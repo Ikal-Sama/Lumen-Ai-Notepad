@@ -1,5 +1,4 @@
 import Link from "next/link";
-import { NotebookPen } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 
@@ -23,7 +22,11 @@ export function Brand({ tone = "dark", className }: BrandProps) {
             : "bg-surface/10 text-white ring-1 ring-white/15",
         )}
       >
-        <NotebookPen className="size-[18px]" strokeWidth={1.8} />
+        <img
+          src="/logo.png"
+          alt="Lumen logo"
+          className="size-[18px] rounded-lg object-cover"
+        />
         <span
           className={cn(
             "absolute -right-0.5 -top-0.5 size-2 rounded-full bg-accent ring-2",

@@ -26,6 +26,10 @@ export const metadata: Metadata = {
   },
   description:
     "A calm, modern note-taking workspace with an AI assistant that can draft, summarize, and save notes for you.",
+  icons: {
+    icon: "/logo.png",
+    apple: "/logo.png",
+  },
 };
 
 export default function RootLayout({

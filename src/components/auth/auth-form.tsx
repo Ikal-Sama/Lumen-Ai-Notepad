@@ -6,6 +6,7 @@ import { useState } from "react";
 import {
   AlertCircle,
   ArrowRight,
+  Download,
   Eye,
   EyeOff,
   Loader2,
@@ -52,21 +53,21 @@ export function AuthForm({ mode }: AuthFormProps) {
 
     const result = isSignUp
       ? await authClient.signUp.email({
-          name: name.trim(),
-          email: email.trim(),
-          password,
-        })
+        name: name.trim(),
+        email: email.trim(),
+        password,
+      })
       : await authClient.signIn.email({
-          email: email.trim(),
-          password,
-        });
+        email: email.trim(),
+        password,
+      });
 
     if (result.error) {
       setError(
         result.error.message ??
-          (isSignUp
-            ? "We couldn't create your account. Please try again."
-            : "That email and password combination doesn't look right."),
+        (isSignUp
+          ? "We couldn't create your account. Please try again."
+          : "That email and password combination doesn't look right."),
       );
       setLoading(false);
       return;
@@ -88,7 +89,7 @@ export function AuthForm({ mode }: AuthFormProps) {
     if (result.error) {
       setError(
         result.error.message ??
-          "Google sign-in isn't configured. Add GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET to .env.local, then restart the server.",
+        "Google sign-in isn't configured. Add GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET to .env.local, then restart the server.",
       );
       setLoading(false);
     }
@@ -243,6 +244,17 @@ export function AuthForm({ mode }: AuthFormProps) {
           )}
         </button>
       </form>
+
+      <div className="mt-4 flex justify-center">
+        <a
+          href="/app-debug.apk"
+          download
+          className="flex h-10 items-center gap-2 rounded-xl border border-line bg-surface px-4 text-[12.5px] font-medium text-ink-soft transition hover:border-line-strong hover:text-ink focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-accent/20"
+        >
+          <Download className="size-4" />
+          Download Android app
+        </a>
+      </div>
 
       <p className="mt-6 text-center text-[12.5px] text-ink-soft">
         {isSignUp ? "Already have a notebook?" : "New to Lumen?"}{" "}
