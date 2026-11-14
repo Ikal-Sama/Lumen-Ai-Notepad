@@ -5,8 +5,7 @@ const config: CapacitorConfig = {
   appName: 'Lumen',
   webDir: 'public',
   server: {
-    url: 'http://10.0.2.2:3000',
-    cleartext: true
+    url: 'https://lumen-ai-notepad.vercel.app'
   }
 };
 
