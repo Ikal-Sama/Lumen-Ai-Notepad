@@ -236,6 +236,17 @@ short confirmation in the same stream.
 3. Use the Supabase **transaction pooler** URL for `DATABASE_URL`.
 4. Run migrations against the database before or during your first deploy.
 
+## Android / Capacitor Development
+
+To run the app on Android via Capacitor:
+1. Start the Next.js dev server on your computer:
+   ```bash
+   npm run dev
+   ```
+2. The Capacitor configuration (`capacitor.config.ts`) points the mobile WebView to `http://10.0.2.2:3000` (the Android emulator's alias for localhost).
+3. Run or deploy the Android app from Android Studio.
+
+
 ## Security notes
 
 - Every notes API handler resolves the session server-side and scopes queries
