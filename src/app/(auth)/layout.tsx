@@ -110,7 +110,7 @@ export default function AuthLayout({
       </aside>
 
       {/* Form panel */}
-      <main className="relative flex min-h-dvh flex-col items-center justify-center px-5 py-10 sm:px-8">
+      <main className="relative flex min-h-dvh flex-col items-center justify-center px-5 pb-16 pt-24 sm:px-8 sm:pt-20 lg:py-10">
         <div
           aria-hidden
           className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_80%_10%,rgba(79,70,229,0.06),transparent_35%)]"

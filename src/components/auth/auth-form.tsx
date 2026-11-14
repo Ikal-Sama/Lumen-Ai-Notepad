@@ -101,7 +101,7 @@ export function AuthForm({ mode }: AuthFormProps) {
         <p className="mb-3 text-[11px] font-medium uppercase tracking-[0.22em] text-accent">
           {isSignUp ? "Create your space" : "Welcome back"}
         </p>
-        <h2 className="font-serif text-[42px] leading-[1.05] tracking-tight text-ink">
+        <h2 className="font-serif text-[34px] leading-[1.05] tracking-tight text-ink sm:text-[42px]">
           {isSignUp ? "Make room for ideas." : "Pick up where you left off."}
         </h2>
         <p className="mt-3 text-[13.5px] leading-6 text-ink-soft">
