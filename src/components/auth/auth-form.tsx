@@ -2,7 +2,8 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { Capacitor } from "@capacitor/core";
 import {
   AlertCircle,
   ArrowRight,
@@ -31,6 +32,12 @@ export function AuthForm({ mode }: AuthFormProps) {
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [isNativeApp, setIsNativeApp] = useState(false);
+
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- sync with Capacitor native runtime on mount
+    setIsNativeApp(Capacitor.isNativePlatform());
+  }, []);
 
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -245,16 +252,18 @@ export function AuthForm({ mode }: AuthFormProps) {
         </button>
       </form>
 
-      <div className="mt-4 flex justify-center">
-        <a
-          href="/app-debug.apk"
-          download
-          className="flex h-10 items-center gap-2 rounded-xl border border-line bg-surface px-4 text-[12.5px] font-medium text-ink-soft transition hover:border-line-strong hover:text-ink focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-accent/20"
-        >
-          <Download className="size-4" />
-          Download Android app
-        </a>
-      </div>
+      {!isNativeApp && (
+        <div className="mt-4 flex justify-center">
+          <a
+            href="/app-debug.apk"
+            download
+            className="flex h-10 items-center gap-2 rounded-xl border border-line bg-surface px-4 text-[12.5px] font-medium text-ink-soft transition hover:border-line-strong hover:text-ink focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-accent/20"
+          >
+            <Download className="size-4" />
+            Download Android app
+          </a>
+        </div>
+      )}
 
       <p className="mt-6 text-center text-[12.5px] text-ink-soft">
         {isSignUp ? "Already have a notebook?" : "New to Lumen?"}{" "}
