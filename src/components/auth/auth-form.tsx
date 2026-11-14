@@ -115,9 +115,7 @@ export function AuthForm({ mode }: AuthFormProps) {
 
         const loginRes = await SocialLogin.login({
           provider: "google",
-          options: {
-            scopes: ["email", "profile"],
-          },
+          options: {},
         });
 
         const result = loginRes.result as {
