@@ -9,6 +9,7 @@ import {
   NotebookPen,
   Plus,
   Sparkles,
+  Download,
 } from "lucide-react";
 
 import { AiChatPanel } from "@/components/workspace/ai-chat-panel";
