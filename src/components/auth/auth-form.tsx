@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { Capacitor } from "@capacitor/core";
+import { SocialLogin } from "@capgo/capacitor-social-login";
 import {
   AlertCircle,
   ArrowRight,
@@ -17,6 +18,8 @@ import {
 } from "lucide-react";
 
 import { authClient } from "@/lib/auth-client";
+
+let googleNativeInitialized = false;
 
 type AuthFormProps = {
   mode: "sign-in" | "sign-up";
@@ -88,16 +91,101 @@ export function AuthForm({ mode }: AuthFormProps) {
     setError(null);
     setLoading(true);
 
-    const result = await authClient.signIn.social({
-      provider: "google",
-      callbackURL: "/",
-    });
+    try {
+      if (isNativeApp) {
+        const webClientId =
+          process.env.NEXT_PUBLIC_GOOGLE_WEB_CLIENT_ID ||
+          process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID;
 
-    if (result.error) {
-      setError(
-        result.error.message ??
-        "Google sign-in isn't configured. Add GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET to .env.local, then restart the server.",
-      );
+        if (!webClientId) {
+          setError(
+            "Google sign-in isn't configured for the mobile app. Set NEXT_PUBLIC_GOOGLE_WEB_CLIENT_ID (your Google Web client ID) and redeploy.",
+          );
+          return;
+        }
+
+        if (!googleNativeInitialized) {
+          await SocialLogin.initialize({
+            google: {
+              webClientId,
+            },
+          });
+          googleNativeInitialized = true;
+        }
+
+        const loginRes = await SocialLogin.login({
+          provider: "google",
+          options: {
+            scopes: ["email", "profile"],
+          },
+        });
+
+        const result = loginRes.result as {
+          responseType?: string;
+          idToken?: string | null;
+          accessToken?: { token?: string | null } | string | null;
+        };
+
+        if (result?.responseType && result.responseType !== "online") {
+          setError(
+            "Google sign-in did not return an ID token. Ensure the native Google sign-in is configured for online mode.",
+          );
+          return;
+        }
+
+        const idToken = result?.idToken ?? null;
+        const accessToken =
+          typeof result?.accessToken === "string"
+            ? result.accessToken
+            : (result?.accessToken?.token ?? undefined);
+
+        if (!idToken) {
+          setError(
+            "Google sign-in failed: no ID token was returned. Check your Android Google Sign-In configuration (Web client ID, SHA-1, package name).",
+          );
+          return;
+        }
+
+        const signInResult = await authClient.signIn.social({
+          provider: "google",
+          idToken: {
+            token: idToken,
+            ...(accessToken ? { accessToken } : {}),
+          },
+        });
+
+        if (signInResult.error) {
+          setError(
+            signInResult.error.message ??
+              "Google sign-in failed. Please try again.",
+          );
+          return;
+        }
+
+        router.push("/");
+        router.refresh();
+        return;
+      }
+
+      const result = await authClient.signIn.social({
+        provider: "google",
+        callbackURL: "/",
+      });
+
+      if (result.error) {
+        setError(
+          result.error.message ??
+            "Google sign-in isn't configured. Add GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET to .env.local, then restart the server.",
+        );
+        return;
+      }
+    } catch (err) {
+      const message =
+        err instanceof Error
+          ? err.message
+          : "Google sign-in failed. Please try again.";
+      setError(message);
+    } finally {
       setLoading(false);
     }
   }

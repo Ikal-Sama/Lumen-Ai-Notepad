@@ -21,6 +21,7 @@
     "@capacitor/android": "^8.6.2",
     "@capacitor/cli": "^8.6.2",
     "@capacitor/core": "^8.6.2",
+    "@capgo/capacitor-social-login": "^8.7.11",
     "ai": "7.0.173",
     "better-auth": "1.7.23",
     "drizzle-orm": "0.45.4",

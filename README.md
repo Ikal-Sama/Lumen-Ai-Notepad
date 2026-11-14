@@ -79,19 +79,36 @@ OPENAI_API_KEY="sk-..."
 
 ### Google OAuth (optional)
 
+#### Web (browser redirect flow)
 1. In [Google Cloud Console](https://console.cloud.google.com/apis/credentials),
-   create an OAuth 2.0 Client ID (Web application).
-2. Add the authorized redirect URI:
-   `http://localhost:3000/api/auth/callback/google`
-   (use your production URL in production).
-3. Put the client ID and secret in `.env.local`:
+   create an OAuth 2.0 Client ID (**Web application**).
+2. Add authorized redirect URIs:
+   - `http://localhost:3000/api/auth/callback/google`
+   - `https://<your-production-domain>/api/auth/callback/google`
+3. Put the web client ID and secret in `.env.local` (or Vercel env vars):
    ```env
-   GOOGLE_CLIENT_ID="..."
-   GOOGLE_CLIENT_SECRET="..."
+   GOOGLE_CLIENT_ID="..."        # or GOOGLE_WEB_CLIENT_ID
+   GOOGLE_CLIENT_SECRET="..."    # or GOOGLE_WEB_CLIENT_SECRET
    ```
-4. Restart the dev server. The "Continue with Google" button appears on the
-   sign-in and sign-up pages and links to an existing account when the email
-   matches.
+4. Restart the dev server. "Continue with Google" uses the redirect flow on the web.
+
+#### Native Android app (no browser redirect)
+The installed Capacitor app uses native Google Sign-In (`@capgo/capacitor-social-login`) to get an ID token, then signs in with Better Auth (`signIn.social` + `idToken`).
+
+1. Create an **Android** OAuth client in Google Cloud for package `com.lumen.notes` with your app signing certificate **SHA-1** (debug/release as applicable).
+2. Ensure a **Web** OAuth client exists (used by the plugin/server to issue/verify ID tokens for backend auth).
+3. Configure env vars:
+   ```env
+   # Server (Better Auth) - accepts native ID token audiences too
+   GOOGLE_CLIENT_ID="..."              # web client ID (or GOOGLE_WEB_CLIENT_ID)
+   GOOGLE_CLIENT_SECRET="..."          # web client secret (or GOOGLE_WEB_CLIENT_SECRET)
+   GOOGLE_ANDROID_CLIENT_ID="..."      # Android OAuth client ID (optional but recommended)
+
+   # Client (Capacitor plugin, public)
+   NEXT_PUBLIC_GOOGLE_WEB_CLIENT_ID="..."  # same web client ID
+   ```
+4. Run `npx cap sync android`, rebuild/reinstall the APK, and deploy the web app with the public env var set.
+5. If sign-in fails, verify package name, SHA-1, OAuth client IDs, and that the ID token audience is accepted by the server.
 
 
 Push the schema directly (fastest for development):

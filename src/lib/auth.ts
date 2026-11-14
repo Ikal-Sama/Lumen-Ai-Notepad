@@ -5,6 +5,16 @@ import { nextCookies } from "better-auth/next-js";
 import { db } from "@/db";
 import * as schema from "@/db/schema";
 
+const googleWebClientId =
+  process.env.GOOGLE_WEB_CLIENT_ID || process.env.GOOGLE_CLIENT_ID;
+const googleWebClientSecret =
+  process.env.GOOGLE_WEB_CLIENT_SECRET || process.env.GOOGLE_CLIENT_SECRET;
+const googleAndroidClientId = process.env.GOOGLE_ANDROID_CLIENT_ID;
+
+const googleClientIds = Array.from(
+  new Set([googleWebClientId, googleAndroidClientId].filter(Boolean) as string[]),
+);
+
 export const auth = betterAuth({
   appName: "Lumen Notes",
   baseURL: process.env.BETTER_AUTH_URL,
@@ -26,12 +36,13 @@ export const auth = betterAuth({
       requireLocalEmailVerified: false,
     },
   },
-  ...(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET
+  ...(googleWebClientId && googleWebClientSecret
     ? {
         socialProviders: {
           google: {
-            clientId: process.env.GOOGLE_CLIENT_ID,
-            clientSecret: process.env.GOOGLE_CLIENT_SECRET,
+            clientId:
+              googleClientIds.length > 1 ? googleClientIds : googleWebClientId,
+            clientSecret: googleWebClientSecret,
           },
         },
       }
