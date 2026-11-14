@@ -1,15 +1,18 @@
 import {
   ArrowUpRight,
   ListChecks,
-  NotebookPen,
   Sparkles,
 } from "lucide-react";
 
 import { Brand } from "@/components/brand";
 
+function LogoIcon({ className }: { className?: string }) {
+  return <img src="/logo.png" alt="Lumen logo" className={className} />;
+}
+
 const features = [
   {
-    icon: NotebookPen,
+    icon: LogoIcon,
     title: "Write without friction",
     description: "A clean Markdown canvas that stays out of your way.",
   },

@@ -6,10 +6,8 @@ import {
   CheckCircle2,
   ChevronRight,
   Menu,
-  NotebookPen,
   Plus,
   Sparkles,
-  Download,
 } from "lucide-react";
 
 import { AiChatPanel } from "@/components/workspace/ai-chat-panel";
@@ -260,7 +258,11 @@ export function Workspace({ user, initialNotes }: WorkspaceProps) {
             </button>
 
             <span className="flex items-center gap-1.5 md:hidden">
-              <NotebookPen className="size-4 text-ink" />
+              <img
+                src="/logo.png"
+                alt="Lumen logo"
+                className="size-4 rounded object-cover"
+              />
               <span className="font-serif text-[19px] leading-none">Lumen</span>
             </span>
 
@@ -346,9 +348,8 @@ export function Workspace({ user, initialNotes }: WorkspaceProps) {
       <ConfirmDialog
         open={Boolean(deleteTarget)}
         title="Delete this note?"
-        description={`“${
-          deleteTarget?.title.trim() || "Untitled note"
-        }” will be permanently removed. This can’t be undone.`}
+        description={`“${deleteTarget?.title.trim() || "Untitled note"
+          }” will be permanently removed. This can’t be undone.`}
         confirmLabel="Delete note"
         loading={deleting}
         onConfirm={handleConfirmDelete}
@@ -390,7 +391,11 @@ function EmptyState({
         <div className="relative mx-auto w-fit">
           <span className="absolute inset-0 -z-10 scale-150 rounded-full bg-accent/10 blur-2xl" />
           <span className="grid size-14 place-items-center rounded-2xl border border-line bg-surface text-accent shadow-sm">
-            <NotebookPen className="size-6" strokeWidth={1.6} />
+            <img
+              src="/logo.png"
+              alt="Lumen logo"
+              className="size-6 rounded object-cover"
+            />
           </span>
         </div>
 
