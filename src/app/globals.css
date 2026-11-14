@@ -1,0 +1,169 @@
+@import "tailwindcss";
+@plugin "@tailwindcss/typography";
+
+@theme {
+  --color-paper: #f2efe8;
+  --color-surface: #fffdf8;
+  --color-ink: #211f1b;
+  --color-ink-soft: #59544a;
+  --color-muted: #928b7d;
+  --color-line: #e6e0d4;
+  --color-line-strong: #d5cdbd;
+  --color-accent: #4f46e5;
+  --color-accent-deep: #3730a3;
+  --color-accent-soft: #eeefff;
+  --color-sage: #55705c;
+
+  --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-geist-mono), ui-monospace, SFMono-Regular, monospace;
+  --font-serif: var(--font-display-serif), ui-serif, Georgia, serif;
+
+  --animate-rise: rise 0.35s cubic-bezier(0.22, 1, 0.36, 1) both;
+  --animate-fade: fade 0.25s ease-out both;
+  --animate-pulse-soft: pulse-soft 2.4s ease-in-out infinite;
+}
+
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes fade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes pulse-soft {
+  0%,
+  100% {
+    opacity: 0.45;
+    transform: scale(0.92);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+:root {
+  color-scheme: light;
+}
+
+html,
+body {
+  height: 100%;
+}
+
+body {
+  background: var(--color-paper);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+  text-rendering: optimizeLegibility;
+}
+
+::selection {
+  background: #dcd9ff;
+  color: #211f1b;
+}
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #cec6b7 transparent;
+}
+
+*::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+*::-webkit-scrollbar-thumb {
+  background-color: #cec6b7;
+  border-radius: 9999px;
+}
+
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+button,
+a,
+input,
+textarea {
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* Editorial markdown preview */
+.note-prose {
+  --tw-prose-body: #3c3831;
+  --tw-prose-headings: #211f1b;
+  --tw-prose-lead: #59544a;
+  --tw-prose-links: #4338ca;
+  --tw-prose-bold: #211f1b;
+  --tw-prose-counters: #928b7d;
+  --tw-prose-bullets: #b6ae9e;
+  --tw-prose-hr: #e6e0d4;
+  --tw-prose-quotes: #3c3831;
+  --tw-prose-quote-borders: #d5cdbd;
+  --tw-prose-captions: #928b7d;
+  --tw-prose-code: #3730a3;
+  --tw-prose-pre-code: #f5f2ea;
+  --tw-prose-pre-bg: #26241f;
+  --tw-prose-th-borders: #d5cdbd;
+  --tw-prose-td-borders: #e6e0d4;
+}
+
+.note-prose :where(h1, h2, h3, h4) {
+  letter-spacing: -0.02em;
+}
+
+.note-prose :where(code):not(:where(pre code))::before,
+.note-prose :where(code):not(:where(pre code))::after {
+  content: "";
+}
+
+.note-prose :where(code):not(:where(pre code)) {
+  background: #f0ece2;
+  padding: 0.15rem 0.35rem;
+  border-radius: 0.35rem;
+  font-weight: 500;
+  font-size: 0.875em;
+}
+
+.note-prose :where(pre) {
+  border-radius: 0.9rem;
+  font-size: 0.85rem;
+}
+
+.note-prose :where(blockquote) {
+  font-style: normal;
+  border-left-width: 2px;
+}
+
+.note-prose :where(input[type="checkbox"]) {
+  accent-color: #4f46e5;
+}
+
+/* Textarea auto-grow needs no native resize handle */
+.no-resize {
+  resize: none;
+}
+
+/* Hide scrollbar on horizontal toolbars */
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}

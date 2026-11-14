@@ -1,0 +1,512 @@
+"use client";
+
+import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  AlertCircle,
+  Bold,
+  Check,
+  Code2,
+  Eye,
+  Heading2,
+  Italic,
+  List,
+  ListChecks,
+  Loader2,
+  Pencil,
+  Quote,
+  Save,
+  Sparkles,
+  Trash2,
+} from "lucide-react";
+
+import { Markdown } from "@/components/markdown";
+import type { Note } from "@/lib/types";
+import {
+  cn,
+  countWords,
+  formatLongDate,
+  formatNoteDate,
+  readingTime,
+} from "@/lib/utils";
+
+type SaveStatus = "saved" | "unsaved" | "saving" | "error";
+type EditorMode = "edit" | "preview";
+
+type NoteEditorProps = {
+  note: Note;
+  /** Incremented when the AI changes the open note, forcing a refresh. */
+  revision: number;
+  onSave: (
+    id: string,
+    update: { title: string; content: string },
+  ) => Promise<Note>;
+  onRequestDelete: () => void;
+  onAiAction?: (prompt: string) => void;
+  onRegisterFlush?: (flush: (() => Promise<boolean>) | null) => void;
+};
+
+const AI_ACTIONS = [
+  {
+    label: "Improve",
+    title: "Tighten the writing and improve clarity",
+    prompt:
+      "Improve the note I have open. Tighten the writing, improve clarity and flow, and keep my voice. Use the updateNote tool to save the improved version.",
+  },
+  {
+    label: "Summarize",
+    title: "Add a concise summary to the note",
+    prompt:
+      "Append a concise \"## Summary\" section to the note I have open. Use the appendToNote tool.",
+  },
+  {
+    label: "Continue",
+    title: "Continue writing from where the note ends",
+    prompt:
+      "Continue the note I have open with a natural next section that fits the existing content and voice. Use the appendToNote tool.",
+  },
+];
+
+export function NoteEditor({
+  note,
+  revision,
+  onSave,
+  onRequestDelete,
+  onAiAction,
+  onRegisterFlush,
+}: NoteEditorProps) {
+  const [title, setTitle] = useState(note.title);
+  const [content, setContent] = useState(note.content);
+  const [mode, setMode] = useState<EditorMode>("edit");
+  const [status, setStatus] = useState<SaveStatus>("saved");
+
+  const titleRef = useRef(note.title);
+  const contentRef = useRef(note.content);
+  const dirtyRef = useRef(false);
+  const savePromiseRef = useRef<Promise<void> | null>(null);
+  const noteRef = useRef(note);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  useEffect(() => {
+    noteRef.current = note;
+  }, [note]);
+
+  const persist = useCallback((): Promise<void> => {
+    if (savePromiseRef.current) return savePromiseRef.current;
+
+    const run = (async () => {
+      while (dirtyRef.current) {
+        dirtyRef.current = false;
+        setStatus("saving");
+
+        try {
+          await onSave(note.id, {
+            title: titleRef.current,
+            content: contentRef.current,
+          });
+        } catch {
+          dirtyRef.current = true;
+          setStatus("error");
+          return;
+        }
+      }
+
+      setStatus("saved");
+    })().finally(() => {
+      savePromiseRef.current = null;
+    });
+
+    savePromiseRef.current = run;
+    return run;
+  }, [note.id, onSave]);
+
+  /** Flush pending changes and resolve whether the note is now saved. */
+  const flush = useCallback(async (): Promise<boolean> => {
+    await persist();
+    if (dirtyRef.current) await persist();
+    return !dirtyRef.current;
+  }, [persist]);
+
+  useEffect(() => {
+    if (!onRegisterFlush) return;
+    onRegisterFlush(flush);
+    return () => onRegisterFlush(null);
+  }, [flush, onRegisterFlush]);
+
+  // When the AI updates this note, replace the local draft with the new content.
+  useEffect(() => {
+    if (revision === 0) return;
+    const latest = noteRef.current;
+    titleRef.current = latest.title;
+    contentRef.current = latest.content;
+    setTitle(latest.title);
+    setContent(latest.content);
+    dirtyRef.current = false;
+    setStatus("saved");
+  }, [revision]);
+
+  // Debounced auto-save.
+  useEffect(() => {
+    if (!dirtyRef.current) return;
+    const timer = window.setTimeout(() => {
+      void persist();
+    }, 900);
+
+    return () => window.clearTimeout(timer);
+  }, [title, content, persist]);
+
+  // Keyboard shortcut: Cmd/Ctrl + S.
+  useEffect(() => {
+    function handleKeyDown(event: KeyboardEvent) {
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "s") {
+        event.preventDefault();
+        void persist();
+      }
+    }
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [persist]);
+
+  // Auto-grow the Markdown textarea to fit its content.
+  useEffect(() => {
+    const textarea = textareaRef.current;
+    if (!textarea) return;
+    textarea.style.height = "auto";
+    textarea.style.height = `${textarea.scrollHeight}px`;
+  }, [content, mode, title]);
+
+  // Best-effort flush if the editor unmounts before the debounce fires.
+  useEffect(() => {
+    const noteId = note.id;
+    return () => {
+      if (!dirtyRef.current) return;
+      void fetch(`/api/notes/${noteId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          title: titleRef.current,
+          content: contentRef.current,
+        }),
+        keepalive: true,
+      }).catch(() => undefined);
+    };
+  }, [note.id]);
+
+  function markDirty() {
+    dirtyRef.current = true;
+    setStatus("unsaved");
+  }
+
+  function handleTitleChange(value: string) {
+    titleRef.current = value;
+    setTitle(value);
+    markDirty();
+  }
+
+  function handleContentChange(value: string) {
+    contentRef.current = value;
+    setContent(value);
+    markDirty();
+  }
+
+  function applyWrap(before: string, after: string, placeholder: string) {
+    const textarea = textareaRef.current;
+    if (!textarea) return;
+
+    const start = textarea.selectionStart;
+    const end = textarea.selectionEnd;
+    const selected = content.slice(start, end) || placeholder;
+    const next =
+      content.slice(0, start) + before + selected + after + content.slice(end);
+
+    handleContentChange(next);
+    requestAnimationFrame(() => {
+      textarea.focus();
+      textarea.setSelectionRange(
+        start + before.length,
+        start + before.length + selected.length,
+      );
+    });
+  }
+
+  function applyLinePrefix(prefix: string) {
+    const textarea = textareaRef.current;
+    if (!textarea) return;
+
+    const start = textarea.selectionStart;
+    const lineStart = content.lastIndexOf("\n", start - 1) + 1;
+    const next = content.slice(0, lineStart) + prefix + content.slice(lineStart);
+
+    handleContentChange(next);
+    requestAnimationFrame(() => {
+      textarea.focus();
+      const position = start + prefix.length;
+      textarea.setSelectionRange(position, position);
+    });
+  }
+
+  const words = countWords(content);
+  const minutes = readingTime(content);
+
+  const statusLabel: Record<SaveStatus, string> = {
+    saved: "Saved",
+    unsaved: "Unsaved changes",
+    saving: "Saving…",
+    error: "Save failed",
+  };
+
+  return (
+    <div className="flex min-h-0 flex-1 flex-col">
+      {/* Editor toolbar */}
+      <div className="flex h-[52px] shrink-0 items-center justify-between gap-3 border-b border-line/80 px-4 md:px-7">
+        <div
+          className={cn(
+            "flex items-center gap-1.5 text-[11.5px] font-medium",
+            status === "saved" && "text-sage",
+            status === "unsaved" && "text-amber-600",
+            status === "saving" && "text-accent",
+            status === "error" && "text-red-600",
+          )}
+          aria-live="polite"
+        >
+          {status === "saving" && (
+            <Loader2 className="size-3.5 animate-spin" />
+          )}
+          {status === "saved" && <Check className="size-3.5" />}
+          {status === "unsaved" && (
+            <span className="size-1.5 rounded-full bg-amber-500" />
+          )}
+          {status === "error" && <AlertCircle className="size-3.5" />}
+          {statusLabel[status]}
+          <span className="hidden text-muted sm:inline">
+            · edited{" "}
+            <span suppressHydrationWarning>
+              {formatNoteDate(note.updatedAt)}
+            </span>
+          </span>
+        </div>
+
+        <div className="flex items-center gap-1">
+          <button
+            type="button"
+            onClick={() =>
+              setMode((current) => (current === "edit" ? "preview" : "edit"))
+            }
+            className="flex h-8 items-center gap-1.5 rounded-lg px-2.5 text-[12px] font-medium text-ink-soft transition hover:bg-paper hover:text-ink"
+            title={mode === "edit" ? "Preview Markdown" : "Edit Markdown"}
+          >
+            {mode === "edit" ? (
+              <>
+                <Eye className="size-3.5" />
+                <span className="hidden sm:inline">Preview</span>
+              </>
+            ) : (
+              <>
+                <Pencil className="size-3.5" />
+                <span className="hidden sm:inline">Edit</span>
+              </>
+            )}
+          </button>
+
+          <button
+            type="button"
+            onClick={() => void persist()}
+            disabled={status === "saving"}
+            className="flex h-8 items-center gap-1.5 rounded-lg px-2.5 text-[12px] font-medium text-ink-soft transition hover:bg-paper hover:text-ink disabled:cursor-default disabled:opacity-45"
+            title="Save note (Ctrl/Cmd + S)"
+          >
+            {status === "saving" ? (
+              <Loader2 className="size-3.5 animate-spin" />
+            ) : (
+              <Save className="size-3.5" />
+            )}
+            <span className="hidden sm:inline">Save</span>
+          </button>
+
+          <span className="mx-1 h-5 w-px bg-line" />
+
+          <button
+            type="button"
+            onClick={onRequestDelete}
+            className="grid size-8 place-items-center rounded-lg text-muted transition hover:bg-red-50 hover:text-red-600"
+            title="Delete note"
+            aria-label="Delete note"
+          >
+            <Trash2 className="size-3.5" />
+          </button>
+        </div>
+      </div>
+
+      {/* Scrollable document */}
+      <div className="flex-1 overflow-y-auto">
+        <div className="mx-auto w-full max-w-3xl px-5 pb-28 pt-9 sm:px-8 md:px-10 md:pt-12">
+          <input
+            value={title}
+            onChange={(event) => handleTitleChange(event.target.value)}
+            onBlur={() => void persist()}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") {
+                event.preventDefault();
+                textareaRef.current?.focus();
+              }
+            }}
+            placeholder="Untitled note"
+            aria-label="Note title"
+            spellCheck={false}
+            className="w-full bg-transparent font-serif text-[38px] leading-[1.06] tracking-tight text-ink outline-none placeholder:text-muted/45 sm:text-[46px]"
+          />
+
+          <div className="mt-4 flex flex-wrap items-center gap-x-2.5 gap-y-1 text-[11px] text-muted">
+            <span suppressHydrationWarning>
+              {formatLongDate(note.createdAt)}
+            </span>
+            <span className="size-1 rounded-full bg-line-strong" />
+            <span>
+              {words} {words === 1 ? "word" : "words"}
+            </span>
+            <span className="size-1 rounded-full bg-line-strong" />
+            <span>{minutes} min read</span>
+          </div>
+
+          <div className="my-7 h-px bg-line/80" />
+
+          {onAiAction && (
+            <div className="mb-5 flex flex-wrap items-center gap-1.5">
+              <span className="mr-0.5 inline-flex items-center gap-1.5 text-[10px] font-medium uppercase tracking-[0.16em] text-muted">
+                <Sparkles className="size-3 text-accent" />
+                AI actions
+              </span>
+              {AI_ACTIONS.map((action) => (
+                <button
+                  key={action.label}
+                  type="button"
+                  onClick={() => onAiAction(action.prompt)}
+                  title={action.title}
+                  className="rounded-full border border-line bg-paper/60 px-2.5 py-1 text-[10.5px] font-medium text-ink-soft transition hover:border-accent/30 hover:bg-accent-soft hover:text-accent-deep"
+                >
+                  {action.label}
+                </button>
+              ))}
+            </div>
+          )}
+
+          {mode === "edit" ? (
+            <>
+              {/* Markdown formatting toolbar */}
+              <div
+                className="no-scrollbar mb-4 flex items-center gap-0.5 overflow-x-auto"
+                role="toolbar"
+                aria-label="Markdown formatting"
+              >
+                <ToolbarButton
+                  label="Bold"
+                  onClick={() => applyWrap("**", "**", "bold text")}
+                >
+                  <Bold className="size-3.5" />
+                </ToolbarButton>
+                <ToolbarButton
+                  label="Italic"
+                  onClick={() => applyWrap("_", "_", "italic text")}
+                >
+                  <Italic className="size-3.5" />
+                </ToolbarButton>
+                <ToolbarButton
+                  label="Heading"
+                  onClick={() => applyLinePrefix("## ")}
+                >
+                  <Heading2 className="size-3.5" />
+                </ToolbarButton>
+                <span className="mx-1 h-4 w-px shrink-0 bg-line" />
+                <ToolbarButton
+                  label="Bullet list"
+                  onClick={() => applyLinePrefix("- ")}
+                >
+                  <List className="size-3.5" />
+                </ToolbarButton>
+                <ToolbarButton
+                  label="Task list"
+                  onClick={() => applyLinePrefix("- [ ] ")}
+                >
+                  <ListChecks className="size-3.5" />
+                </ToolbarButton>
+                <ToolbarButton
+                  label="Quote"
+                  onClick={() => applyLinePrefix("> ")}
+                >
+                  <Quote className="size-3.5" />
+                </ToolbarButton>
+                <ToolbarButton
+                  label="Inline code"
+                  onClick={() => applyWrap("`", "`", "code")}
+                >
+                  <Code2 className="size-3.5" />
+                </ToolbarButton>
+                <span className="ml-auto hidden shrink-0 pl-3 text-[10.5px] text-muted sm:inline">
+                  Markdown supported
+                </span>
+              </div>
+
+              <textarea
+                ref={textareaRef}
+                value={content}
+                onChange={(event) => handleContentChange(event.target.value)}
+                onBlur={() => void persist()}
+                placeholder={`Start writing, or ask Lumen AI to draft something…
+
+## A heading
+- A thought worth keeping
+- [ ] A next step`}
+                aria-label="Note content"
+                spellCheck
+                className="no-resize min-h-[42vh] w-full overflow-hidden bg-transparent font-mono text-[13.5px] leading-7 text-ink-soft outline-none placeholder:text-muted/50"
+              />
+            </>
+          ) : (
+            <div className="min-h-[42vh]">
+              {content.trim() ? (
+                <Markdown className="prose-base text-[15px]">
+                  {content}
+                </Markdown>
+              ) : (
+                <div className="rounded-xl border border-dashed border-line-strong/70 bg-paper/40 px-6 py-10 text-center">
+                  <p className="text-[13px] text-muted">
+                    This note is still blank. Switch back to editing to add
+                    something.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => setMode("edit")}
+                    className="mt-3 text-[12px] font-medium text-accent-deep hover:underline"
+                  >
+                    Start writing
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ToolbarButton({
+  label,
+  onClick,
+  children,
+}: {
+  label: string;
+  onClick: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      title={label}
+      aria-label={label}
+      className="grid size-7 shrink-0 place-items-center rounded-md text-muted transition hover:bg-paper hover:text-ink"
+    >
+      {children}
+    </button>
+  );
+}
