@@ -79,9 +79,9 @@ export default function AuthLayout({
             disappears.
           </p>
 
-          <div className="mt-12 space-y-5">
+          <div className="mt-12 grid grid-cols-2 gap-x-6 gap-y-5">
             {features.map((feature) => (
-              <div key={feature.title} className="flex gap-3.5">
+              <div key={feature.title} className="flex gap-3">
                 <span className="mt-0.5 grid size-8 shrink-0 place-items-center rounded-lg border border-white/10 bg-white/[0.06]">
                   <feature.icon className="size-4 text-[#b9b4ff]" />
                 </span>
