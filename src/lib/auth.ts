@@ -1,6 +1,7 @@
 import { betterAuth } from "better-auth";
 import { drizzleAdapter } from "@better-auth/drizzle-adapter";
 import { nextCookies } from "better-auth/next-js";
+import { multiSession } from "better-auth/plugins";
 
 import { db } from "@/db";
 import * as schema from "@/db/schema";
@@ -61,7 +62,7 @@ export const auth = betterAuth({
     },
   },
   // `nextCookies` must be the last plugin. It lets server actions set cookies.
-  plugins: [nextCookies()],
+  plugins: [multiSession(), nextCookies()],
 });
 
 export type AuthSession = typeof auth.$Infer.Session;

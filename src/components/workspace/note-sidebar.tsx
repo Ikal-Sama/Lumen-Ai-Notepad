@@ -1,14 +1,16 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
+  ChevronDown,
   FileText,
   Loader2,
   Lock,
   LogOut,
   Plus,
   Search,
+  UserPlus,
   X,
 } from "lucide-react";
 
@@ -46,6 +48,27 @@ export function NoteSidebar({
   const router = useRouter();
   const [query, setQuery] = useState("");
   const [signingOut, setSigningOut] = useState(false);
+  const [accountOpen, setAccountOpen] = useState(false);
+  const accountRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    function onPointerDown(event: MouseEvent) {
+      if (!accountRef.current?.contains(event.target as Node)) {
+        setAccountOpen(false);
+      }
+    }
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") setAccountOpen(false);
+    }
+    if (accountOpen) {
+      document.addEventListener("mousedown", onPointerDown);
+      document.addEventListener("keydown", onKeyDown);
+    }
+    return () => {
+      document.removeEventListener("mousedown", onPointerDown);
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [accountOpen]);
 
   const filteredNotes = useMemo(() => {
     const needle = query.trim().toLowerCase();
@@ -65,7 +88,13 @@ export function NoteSidebar({
       router.refresh();
     } finally {
       setSigningOut(false);
+      setAccountOpen(false);
     }
+  }
+
+  function handleAddAccount() {
+    setAccountOpen(false);
+    router.push("/sign-in");
   }
 
   return (
@@ -205,29 +234,103 @@ export function NoteSidebar({
       </nav>
 
       <div className="border-t border-line/80 p-3">
-        <div className="flex items-center gap-2.5 rounded-xl px-2 py-1.5">
-          <span className="grid size-9 shrink-0 place-items-center rounded-full bg-gradient-to-br from-accent to-[#8b7cf6] text-[11px] font-semibold text-white shadow-sm">
-            {initials(user.name) || "U"}
-          </span>
-          <div className="min-w-0 flex-1">
-            <p className="truncate text-[12.5px] font-medium text-ink">
-              {user.name}
-            </p>
-            <p className="truncate text-[10.5px] text-muted">{user.email}</p>
-          </div>
+        <div ref={accountRef} className="relative">
+          {accountOpen && (
+            <div className="absolute bottom-[calc(100%+8px)] left-0 right-0 z-20 overflow-hidden rounded-xl border border-line bg-surface shadow-[0_12px_32px_-12px_rgba(33,31,27,0.28)]">
+              <div className="border-b border-line/80 px-3 py-3">
+                <p className="text-[11px] font-medium uppercase tracking-[0.14em] text-muted">
+                  Signed in as
+                </p>
+                <div className="mt-2 flex items-center gap-2.5">
+                  {user.image ? (
+                    <img
+                      src={user.image}
+                      alt={user.name || "Profile"}
+                      className="size-9 shrink-0 rounded-full object-cover ring-1 ring-line"
+                      referrerPolicy="no-referrer"
+                    />
+                  ) : (
+                    <span className="grid size-9 shrink-0 place-items-center rounded-full bg-gradient-to-br from-accent to-[#8b7cf6] text-[11px] font-semibold text-white shadow-sm">
+                      {initials(user.name) || "U"}
+                    </span>
+                  )}
+                  <div className="min-w-0">
+                    <p className="truncate text-[13px] font-medium text-ink">
+                      {user.name || "Account"}
+                    </p>
+                    <p className="truncate text-[11px] text-muted">{user.email}</p>
+                  </div>
+                </div>
+              </div>
+              <div className="p-1.5">
+                <button
+                  type="button"
+                  onClick={handleAddAccount}
+                  className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-[12.5px] text-ink-soft transition hover:bg-[#f7f4ed] hover:text-ink"
+                >
+                  <UserPlus className="size-4 text-muted" />
+                  Add account
+                </button>
+                <button
+                  type="button"
+                  onClick={handleAddAccount}
+                  className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-[12.5px] text-ink-soft transition hover:bg-[#f7f4ed] hover:text-ink"
+                >
+                  <UserPlus className="size-4 text-muted" />
+                  Switch account
+                </button>
+                <button
+                  type="button"
+                  onClick={handleSignOut}
+                  disabled={signingOut}
+                  className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-[12.5px] text-ink-soft transition hover:bg-[#f7f4ed] hover:text-ink disabled:opacity-60"
+                >
+                  {signingOut ? (
+                    <Loader2 className="size-4 animate-spin text-muted" />
+                  ) : (
+                    <LogOut className="size-4 text-muted" />
+                  )}
+                  Sign out
+                </button>
+              </div>
+            </div>
+          )}
+
           <button
             type="button"
-            onClick={handleSignOut}
-            disabled={signingOut}
-            className="grid size-8 shrink-0 place-items-center rounded-lg text-muted transition hover:bg-white hover:text-ink disabled:opacity-60"
-            aria-label="Sign out"
-            title="Sign out"
-          >
-            {signingOut ? (
-              <Loader2 className="size-4 animate-spin" />
-            ) : (
-              <LogOut className="size-4" />
+            onClick={() => setAccountOpen((open) => !open)}
+            className={cn(
+              "flex w-full items-center gap-2.5 rounded-xl px-2 py-1.5 text-left transition hover:bg-white/70",
+              accountOpen && "bg-white/80 ring-1 ring-line",
             )}
+            aria-haspopup="menu"
+            aria-expanded={accountOpen}
+            aria-label="Account menu"
+          >
+            {user.image ? (
+              <img
+                src={user.image}
+                alt={user.name || "Profile"}
+                className="size-9 shrink-0 rounded-full object-cover ring-1 ring-line"
+                referrerPolicy="no-referrer"
+              />
+            ) : (
+              <span className="grid size-9 shrink-0 place-items-center rounded-full bg-gradient-to-br from-accent to-[#8b7cf6] text-[11px] font-semibold text-white shadow-sm">
+                {initials(user.name) || "U"}
+              </span>
+            )}
+            <div className="min-w-0 flex-1">
+              <p className="truncate text-[12.5px] font-medium text-ink">
+                {user.name || "Account"}
+              </p>
+              <p className="truncate text-[10.5px] text-muted">{user.email}</p>
+            </div>
+            <ChevronDown
+              className={cn(
+                "size-4 shrink-0 text-muted transition-transform",
+                accountOpen && "rotate-180",
+              )}
+            />
           </button>
         </div>
       </div>
