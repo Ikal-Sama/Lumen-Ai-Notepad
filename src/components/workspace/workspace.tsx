@@ -454,7 +454,7 @@ export function Workspace({ user, initialNotes }: WorkspaceProps) {
               <Menu className="size-[18px]" />
             </button>
             <span className="flex items-center gap-1.5 md:hidden">
-              <img src="/logo.png" alt="Lumen logo" className="size-4 rounded object-cover" />
+              <img src="/logo.png" alt="Lumen logo" className="size-5 rounded-md object-contain" />
               <span className="font-serif text-[19px] leading-none">Lumen</span>
             </span>
             <div className="hidden min-w-0 items-center gap-1.5 text-[12px] md:flex">
@@ -629,6 +629,19 @@ export function Workspace({ user, initialNotes }: WorkspaceProps) {
           recoveryKey={recoveryKeyShown}
           onDone={() => setRecoveryKeyShown(null)}
         />
+      )}
+
+      {!sidebarOpen && !mobileAiOpen && (
+        <button
+          type="button"
+          onClick={() => void handleCreateNote()}
+          disabled={creating}
+          className="fixed bottom-5 right-5 z-[60] grid size-14 place-items-center rounded-full bg-ink text-surface shadow-lg transition hover:bg-[#37332c] focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-accent/20 disabled:opacity-70 md:hidden"
+          aria-label="Create new note"
+          title="New note"
+        >
+          {creating ? <Loader2 className="size-5 animate-spin" /> : <Plus className="size-6" />}
+        </button>
       )}
 
       {toast && (
@@ -807,8 +820,8 @@ function EmptyState({
       <div className="animate-rise w-full max-w-md text-center">
         <div className="relative mx-auto w-fit">
           <span className="absolute inset-0 -z-10 scale-150 rounded-full bg-accent/10 blur-2xl" />
-          <span className="grid size-14 place-items-center rounded-2xl border border-line bg-surface text-accent shadow-sm">
-            <img src="/logo.png" alt="Lumen logo" className="size-6 rounded object-cover" />
+          <span className="grid size-14 place-items-center text-accent">
+            <img src="/logo.png" alt="Lumen logo" className="size-12 rounded-xl object-contain" />
           </span>
         </div>
         <h1 className="mt-6 font-serif text-[40px] leading-[1.05] tracking-tight text-ink">

@@ -14,18 +14,14 @@ export function Brand({ tone = "dark", className }: BrandProps) {
       className={cn("group flex items-center gap-2.5", className)}
       aria-label="Lumen home"
     >
-      <span
-        className={cn(
-          "relative grid size-9 place-items-center rounded-xl shadow-sm transition-transform duration-300 group-hover:-rotate-3",
-          tone === "dark"
-            ? "bg-ink text-surface"
-            : "bg-surface/10 text-white ring-1 ring-white/15",
-        )}
-      >
+      <span className="relative inline-flex shrink-0 transition-transform duration-300 group-hover:-rotate-3">
         <img
           src="/logo.png"
           alt="Lumen logo"
-          className="size-[18px] rounded-lg object-cover"
+          className={cn(
+            "size-8 rounded-lg object-contain",
+            tone === "light" && "drop-shadow-sm",
+          )}
         />
         <span
           className={cn(
