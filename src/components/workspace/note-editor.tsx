@@ -17,6 +17,7 @@ import {
   Save,
   Sparkles,
   Trash2,
+  Undo2,
 } from "lucide-react";
 
 import { Markdown } from "@/components/markdown";
@@ -78,6 +79,7 @@ export function NoteEditor({
   const [content, setContent] = useState(note.content);
   const [mode, setMode] = useState<EditorMode>("edit");
   const [status, setStatus] = useState<SaveStatus>("saved");
+  const [canUndo, setCanUndo] = useState(false);
 
   const titleRef = useRef(note.title);
   const contentRef = useRef(note.content);
@@ -85,6 +87,11 @@ export function NoteEditor({
   const savePromiseRef = useRef<Promise<void> | null>(null);
   const noteRef = useRef(note);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const historyRef = useRef<Array<{ title: string; content: string }>>([]);
+  const historyGroupRef = useRef<number>(0);
+  const applyingHistoryRef = useRef(false);
+  const HISTORY_LIMIT = 100;
+  const HISTORY_GROUP_MS = 700;
 
   useEffect(() => {
     noteRef.current = note;
@@ -142,6 +149,9 @@ export function NoteEditor({
     setContent(latest.content);
     dirtyRef.current = false;
     setStatus("saved");
+    historyRef.current = [];
+    historyGroupRef.current = 0;
+    setCanUndo(false);
   }, [revision]);
 
   // Debounced auto-save.
@@ -153,18 +163,6 @@ export function NoteEditor({
 
     return () => window.clearTimeout(timer);
   }, [title, content, persist]);
-
-  // Keyboard shortcut: Cmd/Ctrl + S.
-  useEffect(() => {
-    function handleKeyDown(event: KeyboardEvent) {
-      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "s") {
-        event.preventDefault();
-        void persist();
-      }
-    }
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [persist]);
 
   // Auto-grow the Markdown textarea to fit its content.
   useEffect(() => {
@@ -196,13 +194,88 @@ export function NoteEditor({
     setStatus("unsaved");
   }
 
+  function pushHistorySnapshot(force = false) {
+    if (applyingHistoryRef.current) return;
+    const snapshot = { title: titleRef.current, content: contentRef.current };
+    const last = historyRef.current[historyRef.current.length - 1];
+    if (!last) {
+      historyRef.current.push(snapshot);
+      historyGroupRef.current = Date.now();
+      setCanUndo(false);
+      return;
+    }
+    if (last.title === snapshot.title && last.content === snapshot.content) {
+      return;
+    }
+    const now = Date.now();
+    if (!force && now - historyGroupRef.current < HISTORY_GROUP_MS) {
+      // Coalesce rapid edits into the current undo step.
+      historyGroupRef.current = now;
+      setCanUndo(historyRef.current.length > 0);
+      return;
+    }
+    historyRef.current.push(snapshot);
+    if (historyRef.current.length > HISTORY_LIMIT) {
+      historyRef.current.shift();
+    }
+    historyGroupRef.current = now;
+    setCanUndo(historyRef.current.length > 0);
+  }
+
+  function ensureHistorySeed() {
+    if (historyRef.current.length === 0) {
+      historyRef.current.push({ title: titleRef.current, content: contentRef.current });
+      historyGroupRef.current = 0;
+      setCanUndo(false);
+    }
+  }
+
+  const undo = useCallback(() => {
+    const stack = historyRef.current;
+    if (stack.length === 0) return;
+    const previous = stack.pop();
+    if (!previous) return;
+    applyingHistoryRef.current = true;
+    titleRef.current = previous.title;
+    contentRef.current = previous.content;
+    setTitle(previous.title);
+    setContent(previous.content);
+    dirtyRef.current = true;
+    setStatus("unsaved");
+    setCanUndo(stack.length > 0);
+    requestAnimationFrame(() => {
+      applyingHistoryRef.current = false;
+    });
+  }, []);
+
+  // Keyboard shortcuts: Cmd/Ctrl + S, Cmd/Ctrl + Z (undo).
+  useEffect(() => {
+    function handleKeyDown(event: KeyboardEvent) {
+      if (!(event.metaKey || event.ctrlKey)) return;
+      const key = event.key.toLowerCase();
+      if (key === "s") {
+        event.preventDefault();
+        void persist();
+      } else if (key === "z" && !event.shiftKey) {
+        event.preventDefault();
+        undo();
+      }
+    }
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [persist, undo]);
+
   function handleTitleChange(value: string) {
+    ensureHistorySeed();
+    pushHistorySnapshot();
     titleRef.current = value;
     setTitle(value);
     markDirty();
   }
 
   function handleContentChange(value: string) {
+    ensureHistorySeed();
+    pushHistorySnapshot();
     contentRef.current = value;
     setContent(value);
     markDirty();
@@ -323,6 +396,17 @@ export function NoteEditor({
           </button>
 
           <span className="mx-1 h-5 w-px bg-line" />
+
+          <button
+            type="button"
+            onClick={undo}
+            disabled={!canUndo}
+            className="grid size-8 place-items-center rounded-lg text-muted transition hover:bg-paper hover:text-ink disabled:cursor-default disabled:opacity-35"
+            title="Undo (Ctrl/Cmd + Z)"
+            aria-label="Undo"
+          >
+            <Undo2 className="size-3.5" />
+          </button>
 
           <button
             type="button"

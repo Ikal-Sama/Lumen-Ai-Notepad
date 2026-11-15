@@ -1,6 +1,7 @@
 import {
   boolean,
   index,
+  integer,
   pgTable,
   text,
   timestamp,
@@ -116,8 +117,14 @@ export const notes = pgTable(
       .notNull()
       .references(() => user.id, { onDelete: "cascade" }),
     title: text("title").notNull(),
-    /** Markdown source. */
+    /** Legacy plaintext Markdown source (used when encryptionVersion = 0). */
     content: text("content").notNull().default(""),
+    /** AES-GCM ciphertext (base64) for note content when encrypted. */
+    contentCiphertext: text("content_ciphertext"),
+    /** AES-GCM IV (base64) for note content when encrypted. */
+    contentIv: text("content_iv"),
+    /** 0 = legacy plaintext, 1 = client-side E2EE. */
+    encryptionVersion: integer("encryption_version").notNull().default(0),
     createdAt: timestamp("created_at", { withTimezone: true })
       .defaultNow()
       .notNull(),
@@ -132,6 +139,37 @@ export const notes = pgTable(
   ],
 );
 
+export const userEncryptionKeys = pgTable("user_encryption_key", {
+  userId: text("user_id")
+    .primaryKey()
+    .references(() => user.id, { onDelete: "cascade" }),
+  /** Base64 salt for password KDF. */
+  kdfSalt: text("kdf_salt").notNull(),
+  /** PBKDF2 iterations. */
+  kdfIterations: integer("kdf_iterations").notNull(),
+  /** Wrapped DEK (base64). */
+  wrappedDek: text("wrapped_dek").notNull(),
+  /** IV for wrapped DEK (base64). */
+  wrappedDekIv: text("wrapped_dek_iv").notNull(),
+  /** Wrapped DEK using recovery-key-derived KEK (base64). */
+  recoveryWrappedDek: text("recovery_wrapped_dek").notNull(),
+  /** IV for recovery-wrapped DEK (base64). */
+  recoveryWrappedDekIv: text("recovery_wrapped_dek_iv").notNull(),
+  /** Encrypted verifier for password-unwrapped DEK (base64 ciphertext). */
+  verifierCiphertext: text("verifier_ciphertext").notNull(),
+  /** IV for verifier (base64). */
+  verifierIv: text("verifier_iv").notNull(),
+  keyVersion: integer("key_version").notNull().default(1),
+  createdAt: timestamp("created_at", { withTimezone: true })
+    .defaultNow()
+    .notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true })
+    .defaultNow()
+    .$onUpdate(() => new Date())
+    .notNull(),
+});
+
 export type User = typeof user.$inferSelect;
 export type Session = typeof session.$inferSelect;
 export type NoteRow = typeof notes.$inferSelect;
+export type UserEncryptionKeyRow = typeof userEncryptionKeys.$inferSelect;

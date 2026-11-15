@@ -3,9 +3,15 @@ import type { UIDataTypes, UIMessage } from "ai";
 export type Note = {
   id: string;
   title: string;
+  /** Plaintext content when decrypted/legacy; may be empty for locked encrypted notes. */
   content: string;
   createdAt: string;
   updatedAt: string;
+  encryptionVersion?: number;
+  contentCiphertext?: string | null;
+  contentIv?: string | null;
+  /** Client-side flag: true when encrypted content has been decrypted in memory. */
+  decrypted?: boolean;
 };
 
 export type WorkspaceUser = {
@@ -18,12 +24,17 @@ export type WorkspaceUser = {
 export type CreateNoteOutput = {
   id: string;
   title: string;
+  content?: string;
+  saved?: boolean;
+  action?: "create";
 };
 
 export type NoteMutationOutput = {
   id: string;
   title: string;
   updatedAt: string;
+  content?: string;
+  action?: "update" | "append";
 };
 
 export type NoteSearchResult = {

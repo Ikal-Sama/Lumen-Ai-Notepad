@@ -44,22 +44,30 @@ const suggestions = [
 type AiChatPanelProps = {
   className?: string;
   noteId: string | null;
+  openNote?: { id: string; title: string; content: string } | null;
+  searchableNotes?: Array<{ id: string; title: string; content: string; updatedAt: string }>;
   onBeforeSend: () => Promise<boolean>;
   onClose: () => void;
   onNoteCreated: (noteId: string) => void | Promise<void>;
   onNoteUpdated: (noteId: string) => void | Promise<void>;
   onOpenNote: (noteId: string) => void;
+  onApplyCreateNote?: (output: { title: string; content: string }) => Promise<string>;
+  onApplyMutation?: (output: { id: string; title: string; content: string }) => Promise<void>;
   registerSend?: (send: ((text: string) => void) | null) => void;
 };
 
 export function AiChatPanel({
   className,
   noteId,
+  openNote,
+  searchableNotes = [],
   onBeforeSend,
   onClose,
   onNoteCreated,
   onNoteUpdated,
   onOpenNote,
+  onApplyCreateNote,
+  onApplyMutation,
   registerSend,
 }: AiChatPanelProps) {
   const [input, setInput] = useState("");
@@ -69,12 +77,17 @@ export function AiChatPanel({
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const createdRef = useRef(onNoteCreated);
   const updatedRef = useRef(onNoteUpdated);
+  const applyCreateRef = useRef(onApplyCreateNote);
+  const applyMutationRef = useRef(onApplyMutation);
   const submittingRef = useRef(false);
+  const aiConsentRef = useRef(false);
 
   useEffect(() => {
     createdRef.current = onNoteCreated;
     updatedRef.current = onNoteUpdated;
-  }, [onNoteCreated, onNoteUpdated]);
+    applyCreateRef.current = onApplyCreateNote;
+    applyMutationRef.current = onApplyMutation;
+  }, [onNoteCreated, onNoteUpdated, onApplyCreateNote, onApplyMutation]);
 
   const { messages, sendMessage, status, error, stop, regenerate } =
     useChat<NoteUIMessage>({
@@ -85,16 +98,27 @@ export function AiChatPanel({
           const updated = new Set<string>();
 
           for (const part of message.parts) {
-            if (
-              part.type === "tool-createNote" &&
-              part.state === "output-available"
-            ) {
-              created.add(part.output.id);
+            if (part.type === "tool-createNote" && part.state === "output-available") {
+              if (applyCreateRef.current && part.output.content) {
+                const id = await applyCreateRef.current({
+                  title: part.output.title,
+                  content: part.output.content,
+                });
+                created.add(id);
+              } else {
+                created.add(part.output.id);
+              }
             } else if (
-              (part.type === "tool-updateNote" ||
-                part.type === "tool-appendToNote") &&
+              (part.type === "tool-updateNote" || part.type === "tool-appendToNote") &&
               part.state === "output-available"
             ) {
+              if (applyMutationRef.current && part.output.content) {
+                await applyMutationRef.current({
+                  id: part.output.id,
+                  title: part.output.title,
+                  content: part.output.content,
+                });
+              }
               updated.add(part.output.id);
             }
           }
@@ -121,9 +145,21 @@ export function AiChatPanel({
     element.style.height = `${Math.min(element.scrollHeight, 132)}px`;
   }, [input]);
 
+  function hasAiContentConsent() {
+    if (aiConsentRef.current) return true;
+    if (typeof window === "undefined") return true;
+    const ok = window.confirm(
+      "Are you sure you want to use AI with this note? It may contain sensitive data (passwords, bank accounts, or other private information). Decrypted content may be sent to the AI service for this request.",
+    );
+    if (ok) aiConsentRef.current = true;
+    return ok;
+  }
+
   async function submit(text?: string) {
     const value = (text ?? input).trim();
     if (!value || busy || preparing || submittingRef.current) return;
+
+    if (!hasAiContentConsent()) return;
 
     submittingRef.current = true;
     setSendError(null);
@@ -145,11 +181,15 @@ export function AiChatPanel({
     }
 
     setInput("");
-    void sendMessage({ text: value }, { body: { noteId } });
+    void sendMessage(
+      { text: value },
+      { body: { noteId, openNote: openNote ?? null, searchableNotes } },
+    );
   }
 
   async function retry() {
     setSendError(null);
+    if (!hasAiContentConsent()) return;
     let ready = false;
     try {
       ready = await onBeforeSend();
@@ -164,7 +204,7 @@ export function AiChatPanel({
       return;
     }
 
-    void regenerate({ body: { noteId } });
+    void regenerate({ body: { noteId, openNote: openNote ?? null, searchableNotes } });
   }
 
   const submitRef = useRef<(text?: string) => void>(() => {});

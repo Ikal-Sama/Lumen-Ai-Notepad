@@ -15,10 +15,19 @@ const updateNoteSchema = z
   .object({
     title: z.string().max(200).optional(),
     content: z.string().max(500_000).optional(),
+    contentCiphertext: z.string().max(2_000_000).optional().nullable(),
+    contentIv: z.string().max(200).optional().nullable(),
+    encryptionVersion: z.number().int().min(0).max(10).optional(),
   })
-  .refine((data) => data.title !== undefined || data.content !== undefined, {
-    message: "Provide a title or content to update.",
-  });
+  .refine(
+    (d) =>
+      d.title !== undefined ||
+      d.content !== undefined ||
+      d.contentCiphertext !== undefined ||
+      d.contentIv !== undefined ||
+      d.encryptionVersion !== undefined,
+    { message: "Provide a title or content to update." },
+  );
 
 export async function GET(_request: Request, context: RouteContext) {
   const session = await getSession();
@@ -65,12 +74,31 @@ export async function PATCH(request: Request, context: RouteContext) {
     );
   }
 
-  const updates: { title?: string; content?: string } = {};
+  const updates: {
+    title?: string;
+    content?: string;
+    contentCiphertext?: string | null;
+    contentIv?: string | null;
+    encryptionVersion?: number;
+  } = {};
+
   if (parsed.data.title !== undefined) {
     updates.title = parsed.data.title;
   }
-  if (parsed.data.content !== undefined) {
+
+  const encryptionVersion = parsed.data.encryptionVersion;
+  if (encryptionVersion !== undefined && encryptionVersion > 0) {
+    updates.encryptionVersion = encryptionVersion;
+    updates.content = "";
+    updates.contentCiphertext = parsed.data.contentCiphertext ?? null;
+    updates.contentIv = parsed.data.contentIv ?? null;
+  } else if (parsed.data.content !== undefined) {
     updates.content = parsed.data.content;
+    if (encryptionVersion === 0) {
+      updates.encryptionVersion = 0;
+      updates.contentCiphertext = null;
+      updates.contentIv = null;
+    }
   }
 
   const [note] = await db

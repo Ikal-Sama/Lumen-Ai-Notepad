@@ -8,6 +8,13 @@
       "when": 1794620277369,
       "tag": "0000_regular_quentin_quire",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1794620400000,
+      "tag": "0001_e2ee_notes",
+      "breakpoints": true
     }
   ]
 }

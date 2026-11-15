@@ -266,13 +266,10 @@ To run the app on Android via Capacitor:
 
 ## Security notes
 
-- Every notes API handler resolves the session server-side and scopes queries
-  with both `note.id` and `session.user.id`; users can never read or mutate
-  another user's notes.
+- **E2EE note content:** note bodies are encrypted client-side (Web Crypto, AES-GCM; key wrapped via password-derived KEK) before API/DB storage, so database contents do not reveal note text. **Titles are stored in plaintext** for sidebar/navigation. Unlock is required per session (and on reload) with your account password or recovery key.
+- **Recovery:** a one-time recovery key is generated at encryption setup and must be saved by the user. Losing both password and recovery key means encrypted note content cannot be recovered.
+- **AI and privacy:** using AI actions on an unlocked note sends decrypted content to the AI service for that request (the app shows a once-per-session confirmation). AI-assisted note mutations are applied client-side and saved back as encrypted content.
+- **Access control:** every notes/key API handler resolves the session server-side and scopes queries with `session.user.id`; users cannot read or mutate another user's notes or key material.
 - The chat route is authenticated before the model is called.
 - Note content is rendered with `react-markdown` (no `dangerouslySetInnerHTML`).
-- The AI is instructed to use the note tools, but the tools enforce ownership
-  with the server-side `session.user.id` — never a user ID supplied by the
-  client. The editable note is resolved from the server-verified open-note ID,
-  so the model cannot target another user's note. Search is read-only and
-  scoped to the signed-in user.
+- **Migration:** existing plaintext notes are migrated to encrypted storage on first successful unlock. Apply the included Drizzle migration (`drizzle/0001_e2ee_notes.sql`) before using E2EE in an existing database.
