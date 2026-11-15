@@ -1,7 +1,9 @@
 import {
   ArrowUpRight,
   ListChecks,
+  Lock,
   Sparkles,
+  Undo2,
 } from "lucide-react";
 
 import { Brand } from "@/components/brand";
@@ -25,6 +27,17 @@ const features = [
     icon: ListChecks,
     title: "Turn talk into action",
     description: "Plans and checklists get saved straight to your notebook.",
+  },
+  {
+    icon: Lock,
+    title: "Encrypt notes you choose",
+    description:
+      "Protect sensitive note content with opt-in encryption and a recovery key.",
+  },
+  {
+    icon: Undo2,
+    title: "Undo and edit with confidence",
+    description: "Step back changes in the editor and keep your writing in flow.",
   },
 ];
 
