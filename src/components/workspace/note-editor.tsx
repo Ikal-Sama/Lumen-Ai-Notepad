@@ -12,9 +12,11 @@ import {
   List,
   ListChecks,
   Loader2,
+  Lock,
   Pencil,
   Quote,
   Save,
+  Shield,
   Sparkles,
   Trash2,
   Undo2,
@@ -37,6 +39,7 @@ type NoteEditorProps = {
   note: Note;
   /** Incremented when the AI changes the open note, forcing a refresh. */
   revision: number;
+  isEncrypted?: boolean;
   onSave: (
     id: string,
     update: { title: string; content: string },
@@ -44,6 +47,7 @@ type NoteEditorProps = {
   onRequestDelete: () => void;
   onAiAction?: (prompt: string) => void;
   onRegisterFlush?: (flush: (() => Promise<boolean>) | null) => void;
+  onEncryptNote?: () => void;
 };
 
 const AI_ACTIONS = [
@@ -70,10 +74,12 @@ const AI_ACTIONS = [
 export function NoteEditor({
   note,
   revision,
+  isEncrypted = false,
   onSave,
   onRequestDelete,
   onAiAction,
   onRegisterFlush,
+  onEncryptNote,
 }: NoteEditorProps) {
   const [title, setTitle] = useState(note.title);
   const [content, setContent] = useState(note.content);
@@ -173,21 +179,24 @@ export function NoteEditor({
   }, [content, mode, title]);
 
   // Best-effort flush if the editor unmounts before the debounce fires.
+  // For encrypted notes, plaintext keepalive would corrupt stored data, so skip and rely on normal save.
   useEffect(() => {
     const noteId = note.id;
+    const encrypted = (note.encryptionVersion ?? 0) > 0;
     return () => {
-      if (!dirtyRef.current) return;
+      if (!dirtyRef.current || encrypted) return;
       void fetch(`/api/notes/${noteId}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           title: titleRef.current,
           content: contentRef.current,
+          encryptionVersion: 0,
         }),
         keepalive: true,
       }).catch(() => undefined);
     };
-  }, [note.id]);
+  }, [note.id, note.encryptionVersion]);
 
   function markDirty() {
     dirtyRef.current = true;
@@ -359,6 +368,22 @@ export function NoteEditor({
         </div>
 
         <div className="flex items-center gap-1">
+          {isEncrypted ? (
+            <span className="mr-1 hidden items-center gap-1 rounded-md bg-sage/10 px-2 py-1 text-[10.5px] font-medium text-sage sm:inline-flex" title="This note's content is encrypted">
+              <Lock className="size-3" /> Encrypted
+            </span>
+          ) : onEncryptNote ? (
+            <button
+              type="button"
+              onClick={onEncryptNote}
+              className="mr-1 flex h-8 items-center gap-1.5 rounded-lg px-2.5 text-[12px] font-medium text-ink-soft transition hover:bg-paper hover:text-ink"
+              title="Encrypt this note (one-way)"
+            >
+              <Shield className="size-3.5" />
+              <span className="hidden sm:inline">Encrypt</span>
+            </button>
+          ) : null}
+
           <button
             type="button"
             onClick={() =>

@@ -17,6 +17,7 @@ import {
   X,
 } from "lucide-react";
 
+import { ConfirmDialog } from "@/components/workspace/confirm-dialog";
 import { Markdown } from "@/components/markdown";
 import type { NoteUIMessage } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -45,6 +46,7 @@ type AiChatPanelProps = {
   className?: string;
   noteId: string | null;
   openNote?: { id: string; title: string; content: string } | null;
+  openNoteIsEncrypted?: boolean;
   searchableNotes?: Array<{ id: string; title: string; content: string; updatedAt: string }>;
   onBeforeSend: () => Promise<boolean>;
   onClose: () => void;
@@ -60,6 +62,7 @@ export function AiChatPanel({
   className,
   noteId,
   openNote,
+  openNoteIsEncrypted = false,
   searchableNotes = [],
   onBeforeSend,
   onClose,
@@ -80,7 +83,9 @@ export function AiChatPanel({
   const applyCreateRef = useRef(onApplyCreateNote);
   const applyMutationRef = useRef(onApplyMutation);
   const submittingRef = useRef(false);
-  const aiConsentRef = useRef(false);
+  const aiConsentNotesRef = useRef<Set<string>>(new Set());
+  const [warningOpen, setWarningOpen] = useState(false);
+  const pendingActionRef = useRef<(() => void) | null>(null);
 
   useEffect(() => {
     createdRef.current = onNoteCreated;
@@ -145,22 +150,25 @@ export function AiChatPanel({
     element.style.height = `${Math.min(element.scrollHeight, 132)}px`;
   }, [input]);
 
-  function hasAiContentConsent() {
-    if (aiConsentRef.current) return true;
-    if (typeof window === "undefined") return true;
-    const ok = window.confirm(
-      "Are you sure you want to use AI with this note? It may contain sensitive data (passwords, bank accounts, or other private information). Decrypted content may be sent to the AI service for this request.",
-    );
-    if (ok) aiConsentRef.current = true;
-    return ok;
+  function requiresEncryptedNoteWarning() {
+    return Boolean(openNoteIsEncrypted && noteId);
   }
 
-  async function submit(text?: string) {
-    const value = (text ?? input).trim();
-    if (!value || busy || preparing || submittingRef.current) return;
+  function hasAiContentConsent() {
+    if (!requiresEncryptedNoteWarning() || !noteId) return true;
+    return aiConsentNotesRef.current.has(noteId);
+  }
 
-    if (!hasAiContentConsent()) return;
+  function requestWithConsent(action: () => void) {
+    if (hasAiContentConsent()) {
+      action();
+      return;
+    }
+    pendingActionRef.current = action;
+    setWarningOpen(true);
+  }
 
+  async function doSubmit(value: string) {
     submittingRef.current = true;
     setSendError(null);
     setPreparing(true);
@@ -187,24 +195,36 @@ export function AiChatPanel({
     );
   }
 
-  async function retry() {
+  async function submit(text?: string) {
+    const value = (text ?? input).trim();
+    if (!value || busy || preparing || submittingRef.current) return;
+    requestWithConsent(() => {
+      void doSubmit(value);
+    });
+  }
+
+  async function doRetry() {
     setSendError(null);
-    if (!hasAiContentConsent()) return;
     let ready = false;
     try {
       ready = await onBeforeSend();
     } catch {
       ready = false;
     }
-
     if (!ready) {
       setSendError(
         "Couldn’t save the current note. Try again before asking the AI to edit it.",
       );
       return;
     }
-
     void regenerate({ body: { noteId, openNote: openNote ?? null, searchableNotes } });
+  }
+
+  async function retry() {
+    if (busy || preparing || submittingRef.current) return;
+    requestWithConsent(() => {
+      void doRetry();
+    });
   }
 
   const submitRef = useRef<(text?: string) => void>(() => {});
@@ -229,6 +249,25 @@ export function AiChatPanel({
       )}
       aria-label="AI assistant"
     >
+      <ConfirmDialog
+        open={warningOpen}
+        tone="warning"
+        title="Use AI with this encrypted note?"
+        description="This note is encrypted. If you continue, its decrypted content may be sent to the AI service for this request. This confirmation is asked once per encrypted note for this session."
+        confirmLabel="Continue"
+        cancelLabel="Cancel"
+        onCancel={() => {
+          setWarningOpen(false);
+          pendingActionRef.current = null;
+        }}
+        onConfirm={() => {
+          if (noteId) aiConsentNotesRef.current.add(noteId);
+          setWarningOpen(false);
+          const pending = pendingActionRef.current;
+          pendingActionRef.current = null;
+          pending?.();
+        }}
+      />
       {/* Header */}
       <div className="flex h-[58px] shrink-0 items-center justify-between border-b border-line/80 px-4">
         <div className="flex items-center gap-2.5">

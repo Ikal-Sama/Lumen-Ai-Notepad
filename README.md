@@ -8,10 +8,11 @@ A calm, three-panel notebook built with the Next.js App Router. Write Markdown, 
 
 - **Email/password auth** with Better Auth + the Drizzle adapter, plus optional Google OAuth
 - **Private notes** scoped to the signed-in user, with cascade deletes
+- **Opt-in per-note encryption (E2EE)** — encrypt individual notes in the browser (ciphertext stored in DB, titles remain plaintext). One-time recovery key at setup; one-way once enabled; unlock prompted on demand for encrypted notes.
 - **Three-panel workspace** — notes sidebar, Markdown editor, collapsible AI chat
-- **Markdown editing** with auto-save, manual save (`Ctrl/Cmd + S`), preview, and formatting toolbar
-- **AI tool calling** — create notes (`createNote`), read, rewrite, or append to the open note (`updateNote`, `appendToNote`), and search across all notes (`searchNotes`)
-- **AI quick actions** — Improve, Summarize, and Continue buttons send the open note to the assistant after flushing unsaved edits
+- **Markdown editing** with auto-save, manual save (`Ctrl/Cmd + S`), undo (`Ctrl/Cmd + Z`), preview, and formatting toolbar
+- **AI tool calling** — create notes (`createNote`), read, rewrite, or append to the open note (`updateNote`, `appendToNote`), and search across notes available in the current session (`searchNotes`)
+- **AI quick actions** — Improve, Summarize, and Continue buttons send the open note to the assistant after flushing unsaved edits (with an in-app warning for encrypted notes, once per encrypted note per session)
 - **Real-time sync** — when the AI creates or edits a note, the sidebar and editor refresh automatically
 - **Responsive** — the sidebar and AI panel become overlays on small screens
 
@@ -266,10 +267,10 @@ To run the app on Android via Capacitor:
 
 ## Security notes
 
-- **E2EE note content:** note bodies are encrypted client-side (Web Crypto, AES-GCM; key wrapped via password-derived KEK) before API/DB storage, so database contents do not reveal note text. **Titles are stored in plaintext** for sidebar/navigation. Unlock is required per session (and on reload) with your account password or recovery key.
-- **Recovery:** a one-time recovery key is generated at encryption setup and must be saved by the user. Losing both password and recovery key means encrypted note content cannot be recovered.
-- **AI and privacy:** using AI actions on an unlocked note sends decrypted content to the AI service for that request (the app shows a once-per-session confirmation). AI-assisted note mutations are applied client-side and saved back as encrypted content.
+- **Opt-in per-note E2EE:** you choose which notes to encrypt. Encrypted note bodies are encrypted client-side (Web Crypto, AES-GCM; key wrapped via password-derived KEK) before API/DB storage, so database contents do not reveal their text. **Titles are stored in plaintext** for sidebar/navigation. Plaintext notes remain usable without unlocking encryption.
+- **Unlock & recovery:** unlocking is required to view/edit encrypted notes (prompted on demand). A one-time recovery key is generated at encryption setup and must be saved by the user. Losing both password and recovery key means encrypted note content cannot be recovered. Encryption is one-way once enabled for a note.
+- **AI and privacy:** when using AI on an **encrypted** note, the app shows an in-app warning (once per encrypted note per session) because decrypted content is sent to the AI service for that request. AI-assisted mutations preserve the target note’s encryption state (encrypted notes stay encrypted).
 - **Access control:** every notes/key API handler resolves the session server-side and scopes queries with `session.user.id`; users cannot read or mutate another user's notes or key material.
 - The chat route is authenticated before the model is called.
 - Note content is rendered with `react-markdown` (no `dangerouslySetInnerHTML`).
-- **Migration:** existing plaintext notes are migrated to encrypted storage on first successful unlock. Apply the included Drizzle migration (`drizzle/0001_e2ee_notes.sql`) before using E2EE in an existing database.
+- **Database migration:** apply the included Drizzle migration (`drizzle/0001_e2ee_notes.sql`) before using encrypted notes in an existing database. Notes encrypted by earlier app versions remain encrypted.

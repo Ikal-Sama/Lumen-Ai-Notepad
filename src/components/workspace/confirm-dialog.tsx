@@ -1,14 +1,16 @@
 "use client";
 
 import { useEffect } from "react";
-import { AlertTriangle, Loader2 } from "lucide-react";
+import { AlertTriangle, Loader2, ShieldAlert } from "lucide-react";
 
 type ConfirmDialogProps = {
   open: boolean;
   title: string;
   description: string;
   confirmLabel?: string;
+  cancelLabel?: string;
   loading?: boolean;
+  tone?: "danger" | "warning";
   onConfirm: () => void;
   onCancel: () => void;
 };
@@ -18,7 +20,9 @@ export function ConfirmDialog({
   title,
   description,
   confirmLabel = "Delete",
+  cancelLabel = "Cancel",
   loading = false,
+  tone = "danger",
   onConfirm,
   onCancel,
 }: ConfirmDialogProps) {
@@ -32,6 +36,9 @@ export function ConfirmDialog({
   }, [open, loading, onCancel]);
 
   if (!open) return null;
+
+  const warning = tone === "warning";
+  const Icon = warning ? ShieldAlert : AlertTriangle;
 
   return (
     <div
@@ -47,8 +54,14 @@ export function ConfirmDialog({
         aria-label="Close dialog"
       />
       <div className="animate-rise relative w-full max-w-sm rounded-2xl border border-line bg-surface p-5 shadow-[0_30px_80px_-30px_rgba(33,31,27,0.45)]">
-        <div className="flex size-10 items-center justify-center rounded-full bg-red-50 text-red-600">
-          <AlertTriangle className="size-[18px]" />
+        <div
+          className={
+            warning
+              ? "flex size-10 items-center justify-center rounded-full bg-amber-50 text-amber-700"
+              : "flex size-10 items-center justify-center rounded-full bg-red-50 text-red-600"
+          }
+        >
+          <Icon className="size-[18px]" />
         </div>
         <h2
           id="confirm-title"
@@ -64,13 +77,17 @@ export function ConfirmDialog({
             disabled={loading}
             className="h-9 rounded-lg px-3.5 text-[12.5px] font-medium text-ink-soft transition hover:bg-paper disabled:opacity-60"
           >
-            Cancel
+            {cancelLabel}
           </button>
           <button
             type="button"
             onClick={onConfirm}
             disabled={loading}
-            className="flex h-9 items-center gap-1.5 rounded-lg bg-red-600 px-3.5 text-[12.5px] font-medium text-white transition hover:bg-red-700 disabled:opacity-60"
+            className={
+              warning
+                ? "flex h-9 items-center gap-1.5 rounded-lg bg-ink px-3.5 text-[12.5px] font-medium text-white transition hover:bg-[#35312a] disabled:opacity-60"
+                : "flex h-9 items-center gap-1.5 rounded-lg bg-red-600 px-3.5 text-[12.5px] font-medium text-white transition hover:bg-red-700 disabled:opacity-60"
+            }
           >
             {loading && <Loader2 className="size-3.5 animate-spin" />}
             {confirmLabel}

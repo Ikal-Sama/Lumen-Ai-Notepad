@@ -33,6 +33,10 @@ type ToastState = {
   tone: "success" | "error";
 };
 
+function isEncryptedNote(note: Pick<Note, "encryptionVersion">) {
+  return (note.encryptionVersion ?? 0) > 0;
+}
+
 export function Workspace({ user, initialNotes }: WorkspaceProps) {
   const e2ee = useE2ee();
   const [rawNotes, setRawNotes] = useState<Note[]>(initialNotes);
@@ -48,16 +52,23 @@ export function Workspace({ user, initialNotes }: WorkspaceProps) {
   const [deleting, setDeleting] = useState(false);
   const [toast, setToast] = useState<ToastState | null>(null);
   const [editorRevision, setEditorRevision] = useState(0);
-  const [unlockSecret, setUnlockSecret] = useState("");
-  const [unlockMode, setUnlockMode] = useState<"password" | "recovery">("password");
-  const [unlockError, setUnlockError] = useState<string | null>(null);
-  const [unlocking, setUnlocking] = useState(false);
+
+  // Encryption setup/unlock dialog state (on-demand)
+  const [keyDialog, setKeyDialog] = useState<
+    | { mode: "setup"; noteId?: string }
+    | { mode: "unlock"; noteId?: string }
+    | null
+  >(null);
+  const [keySecret, setKeySecret] = useState("");
+  const [keyMode, setKeyMode] = useState<"password" | "recovery">("password");
+  const [keyError, setKeyError] = useState<string | null>(null);
+  const [keyLoading, setKeyLoading] = useState(false);
   const [recoveryKeyShown, setRecoveryKeyShown] = useState<string | null>(null);
+  const pendingEncryptNoteIdRef = useRef<string | null>(null);
 
   const toastTimer = useRef<number | null>(null);
   const flushNoteRef = useRef<(() => Promise<boolean>) | null>(null);
   const chatSendRef = useRef<((text: string) => void) | null>(null);
-  const migratedRef = useRef(false);
   const { refreshBundle } = e2ee;
 
   const showToast = useCallback(
@@ -81,25 +92,20 @@ export function Workspace({ user, initialNotes }: WorkspaceProps) {
 
   const decryptNotes = useCallback(
     async (items: Note[]) => {
-      if (!e2ee.dek) {
-        return items.map((n) =>
-          (n.encryptionVersion ?? 0) > 0 ? { ...n, content: "", decrypted: false } : { ...n, decrypted: true },
-        );
-      }
       return Promise.all(
         items.map(async (note) => {
-          if ((note.encryptionVersion ?? 0) > 0) {
-            if (note.contentCiphertext && note.contentIv) {
-              try {
-                const content = await e2ee.decryptContent(note.contentCiphertext, note.contentIv);
-                return { ...note, content, decrypted: true };
-              } catch {
-                return { ...note, content: "", decrypted: false };
-              }
-            }
-            return { ...note, content: "", decrypted: false };
+          if (!isEncryptedNote(note)) {
+            return { ...note, decrypted: true };
           }
-          return { ...note, decrypted: true };
+          if (e2ee.dek && note.contentCiphertext && note.contentIv) {
+            try {
+              const content = await e2ee.decryptContent(note.contentCiphertext, note.contentIv);
+              return { ...note, content, decrypted: true };
+            } catch {
+              return { ...note, content: "", decrypted: false };
+            }
+          }
+          return { ...note, content: "", decrypted: false };
         }),
       );
     },
@@ -147,59 +153,17 @@ export function Workspace({ user, initialNotes }: WorkspaceProps) {
     [],
   );
 
-  // Migrate legacy plaintext notes after unlock.
-  useEffect(() => {
-    if (!e2ee.dek || migratedRef.current) return;
-    const legacy = rawNotes.filter((n) => (n.encryptionVersion ?? 0) === 0);
-    if (legacy.length === 0) return;
-    migratedRef.current = true;
-    void (async () => {
-      let changed = false;
-      for (const note of legacy) {
-        try {
-          const enc = await e2ee.encryptContent(note.content ?? "");
-          const res = await fetch(`/api/notes/${note.id}`, {
-            method: "PATCH",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              encryptionVersion: 1,
-              contentCiphertext: enc.ciphertext,
-              contentIv: enc.iv,
-            }),
-          });
-          if (res.ok) changed = true;
-        } catch {
-          // best effort
-        }
-      }
-      if (changed) {
-        await refreshNotes(selectedId ?? undefined);
-        showToast("Existing notes encrypted for your account");
-      }
-    })();
-  }, [e2ee, rawNotes, refreshNotes, selectedId, showToast]);
-
   async function handleCreateNote() {
-    if (!e2ee.dek) {
-      showToast("Unlock your notes before creating a note.", "error");
-      return;
-    }
     setCreating(true);
     try {
-      const enc = await e2ee.encryptContent("");
       const response = await fetch("/api/notes", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          title: "Untitled note",
-          encryptionVersion: 1,
-          contentCiphertext: enc.ciphertext,
-          contentIv: enc.iv,
-        }),
+        body: JSON.stringify({ title: "Untitled note", content: "", encryptionVersion: 0 }),
       });
       if (!response.ok) throw new Error("Could not create note.");
       const data = (await response.json()) as { note: Note };
-      const plain: Note = { ...data.note, content: "", decrypted: true };
+      const plain: Note = { ...data.note, content: "", decrypted: true, encryptionVersion: 0 };
       setRawNotes((current) => [data.note, ...current]);
       setNotes((current) => [plain, ...current]);
       setSelectedId(data.note.id);
@@ -214,17 +178,26 @@ export function Workspace({ user, initialNotes }: WorkspaceProps) {
 
   const handleSaveNote = useCallback(
     async (id: string, update: { title: string; content: string }) => {
-      if (!e2ee.dek) throw new Error("Notes are locked.");
-      const enc = await e2ee.encryptContent(update.content);
-      const response = await fetch(`/api/notes/${id}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
+      const current = rawNotes.find((n) => n.id === id) ?? notes.find((n) => n.id === id);
+      const encrypted = current ? isEncryptedNote(current) : false;
+      let body: Record<string, unknown> = { title: update.title };
+      if (encrypted) {
+        if (!e2ee.dek) throw new Error("Note is locked.");
+        const enc = await e2ee.encryptContent(update.content);
+        body = {
           title: update.title,
           encryptionVersion: 1,
           contentCiphertext: enc.ciphertext,
           contentIv: enc.iv,
-        }),
+        };
+      } else {
+        body = { title: update.title, content: update.content, encryptionVersion: 0 };
+      }
+
+      const response = await fetch(`/api/notes/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
       });
       if (!response.ok) throw new Error("Could not save note.");
       const data = (await response.json()) as { note: Note };
@@ -233,11 +206,11 @@ export function Workspace({ user, initialNotes }: WorkspaceProps) {
         content: update.content,
         decrypted: true,
       };
-      setRawNotes((current) => current.map((n) => (n.id === id ? data.note : n)));
-      setNotes((current) => current.map((n) => (n.id === id ? plain : n)));
+      setRawNotes((cur) => cur.map((n) => (n.id === id ? data.note : n)));
+      setNotes((cur) => cur.map((n) => (n.id === id ? plain : n)));
       return plain;
     },
-    [e2ee],
+    [e2ee, rawNotes, notes],
   );
 
   async function handleConfirmDelete() {
@@ -311,9 +284,122 @@ export function Workspace({ user, initialNotes }: WorkspaceProps) {
     setSidebarOpen(false);
   }
 
+  async function doEncryptNote(noteId: string) {
+    const note = notes.find((n) => n.id === noteId);
+    if (!note || isEncryptedNote(note)) return;
+    if (!e2ee.dek) throw new Error("Encryption key not unlocked.");
+    const content = note.content ?? "";
+    const enc = await e2ee.encryptContent(content);
+    const response = await fetch(`/api/notes/${noteId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        encryptionVersion: 1,
+        contentCiphertext: enc.ciphertext,
+        contentIv: enc.iv,
+      }),
+    });
+    if (!response.ok) throw new Error("Could not encrypt note.");
+    const data = (await response.json()) as { note: Note };
+    const plain: Note = { ...data.note, content, decrypted: true };
+    setRawNotes((cur) => cur.map((n) => (n.id === noteId ? data.note : n)));
+    setNotes((cur) => cur.map((n) => (n.id === noteId ? plain : n)));
+    showToast("Note encrypted");
+  }
+
+  function requestEncryptNote(noteId: string) {
+    const note = notes.find((n) => n.id === noteId);
+    if (!note || isEncryptedNote(note)) return;
+    if (e2ee.dek) {
+      void doEncryptNote(noteId).catch(() => showToast("Couldn’t encrypt note.", "error"));
+      return;
+    }
+    // Need setup or unlock
+    pendingEncryptNoteIdRef.current = noteId;
+    if (!e2ee.hasBundle) {
+      setKeyMode("password");
+      setKeySecret("");
+      setKeyError(null);
+      setKeyDialog({ mode: "setup", noteId });
+    } else {
+      setKeyMode("password");
+      setKeySecret("");
+      setKeyError(null);
+      setKeyDialog({ mode: "unlock", noteId });
+    }
+  }
+
+  function requestUnlockForNote(noteId?: string) {
+    if (!e2ee.hasBundle) {
+      // Setup needed (e.g. encrypt flow) - but unlocking an encrypted note requires existing bundle
+      setKeyMode("password");
+      setKeySecret("");
+      setKeyError(null);
+      setKeyDialog({ mode: "setup", noteId });
+      return;
+    }
+    setKeyMode("password");
+    setKeySecret("");
+    setKeyError(null);
+    setKeyDialog({ mode: "unlock", noteId });
+  }
+
+  async function handleKeySubmit(e: React.FormEvent) {
+    e.preventDefault();
+    setKeyError(null);
+    setKeyLoading(true);
+    try {
+      if (keyDialog?.mode === "setup") {
+        if (keySecret.length < 8) {
+          setKeyError("Enter your account password (at least 8 characters) to set up encryption.");
+          return;
+        }
+        const recovery = await e2ee.setupWithPassword(keySecret);
+        setRecoveryKeyShown(recovery);
+        setKeySecret("");
+        setKeyDialog(null);
+        showToast("Encryption enabled");
+        const pendingId = pendingEncryptNoteIdRef.current;
+        pendingEncryptNoteIdRef.current = null;
+        if (pendingId) {
+          await doEncryptNote(pendingId);
+        }
+      } else if (keyMode === "recovery") {
+        await e2ee.unlockRecovery(keySecret.trim());
+        setKeySecret("");
+        setKeyDialog(null);
+        showToast("Encrypted notes unlocked");
+        const pendingId = pendingEncryptNoteIdRef.current;
+        pendingEncryptNoteIdRef.current = null;
+        if (pendingId) {
+          await doEncryptNote(pendingId).catch(() => showToast("Couldn’t encrypt note.", "error"));
+        }
+      } else {
+        await e2ee.unlockPassword(keySecret);
+        setKeySecret("");
+        setKeyDialog(null);
+        showToast("Encrypted notes unlocked");
+        const pendingId = pendingEncryptNoteIdRef.current;
+        pendingEncryptNoteIdRef.current = null;
+        if (pendingId) {
+          await doEncryptNote(pendingId).catch(() => showToast("Couldn’t encrypt note.", "error"));
+        }
+      }
+    } catch {
+      setKeyError(
+        keyDialog?.mode === "setup"
+          ? "Could not set up encryption. Please try again."
+          : "Could not unlock. Check your password or recovery key.",
+      );
+    } finally {
+      setKeyLoading(false);
+    }
+  }
+
   function handleAiAction(prompt: string) {
-    if (!e2ee.dek) {
-      showToast("Unlock your notes to use AI.", "error");
+    if (selectedNote && isEncryptedNote(selectedNote) && !selectedNote.decrypted) {
+      showToast("Unlock this encrypted note to use AI.", "error");
+      requestUnlockForNote(selectedNote.id);
       return;
     }
     setAiClosed(false);
@@ -322,49 +408,17 @@ export function Workspace({ user, initialNotes }: WorkspaceProps) {
   }
 
   function openAiPanel() {
-    if (!e2ee.dek) {
-      showToast("Unlock your notes to use AI.", "error");
+    if (selectedNote && isEncryptedNote(selectedNote) && !selectedNote.decrypted) {
+      showToast("Unlock this encrypted note to use AI.", "error");
+      requestUnlockForNote(selectedNote.id);
       return;
     }
     setAiClosed(false);
     setMobileAiOpen(true);
   }
 
-  async function handleUnlockSubmit(e: React.FormEvent) {
-    e.preventDefault();
-    setUnlockError(null);
-    setUnlocking(true);
-    try {
-      if (e2ee.needsSetup) {
-        if (unlockSecret.length < 8) {
-          setUnlockError("Enter your account password (at least 8 characters) to set up encryption.");
-          return;
-        }
-        const recovery = await e2ee.setupWithPassword(unlockSecret);
-        setRecoveryKeyShown(recovery);
-        setUnlockSecret("");
-        showToast("End-to-end encryption enabled");
-      } else if (unlockMode === "recovery") {
-        await e2ee.unlockRecovery(unlockSecret.trim());
-        setUnlockSecret("");
-        showToast("Notes unlocked");
-      } else {
-        await e2ee.unlockPassword(unlockSecret);
-        setUnlockSecret("");
-        showToast("Notes unlocked");
-      }
-    } catch {
-      setUnlockError(
-        e2ee.needsSetup
-          ? "Could not set up encryption. Please try again."
-          : "Could not unlock notes. Check your password or recovery key.",
-      );
-    } finally {
-      setUnlocking(false);
-    }
-  }
-
-  const showUnlock = e2ee.ready && (e2ee.needsUnlock || e2ee.needsSetup) && !recoveryKeyShown;
+  const selectedIsEncrypted = selectedNote ? isEncryptedNote(selectedNote) : false;
+  const selectedIsLocked = selectedNote ? selectedIsEncrypted && !selectedNote.decrypted : false;
 
   return (
     <div className="flex h-dvh w-full overflow-hidden bg-paper">
@@ -411,6 +465,7 @@ export function Workspace({ user, initialNotes }: WorkspaceProps) {
                   <span className="truncate font-medium text-ink">
                     {selectedNote.title.trim() || "Untitled note"}
                   </span>
+                  {selectedIsEncrypted && <Lock className="size-3 text-muted" />}
                 </>
               )}
             </div>
@@ -437,37 +492,28 @@ export function Workspace({ user, initialNotes }: WorkspaceProps) {
           </div>
         </div>
 
-        {!e2ee.ready ? (
-          <div className="flex flex-1 items-center justify-center text-[13px] text-muted">
-            <Loader2 className="mr-2 size-4 animate-spin" /> Loading secure workspace…
-          </div>
-        ) : showUnlock ? (
-          <UnlockScreen
-            mode={e2ee.needsSetup ? "setup" : unlockMode}
-            secret={unlockSecret}
-            setSecret={setUnlockSecret}
-            error={unlockError}
-            loading={unlocking}
-            onSubmit={handleUnlockSubmit}
-            onSwitchMode={() =>
-              setUnlockMode((m) => (m === "password" ? "recovery" : "password"))
-            }
-          />
-        ) : recoveryKeyShown ? (
-          <RecoveryKeyScreen
-            recoveryKey={recoveryKeyShown}
-            onDone={() => setRecoveryKeyShown(null)}
-          />
-        ) : selectedNote ? (
-          <NoteEditor
-            key={selectedNote.id}
-            note={selectedNote}
-            revision={editorRevision}
-            onSave={handleSaveNote}
-            onRequestDelete={() => setDeleteTarget(selectedNote)}
-            onAiAction={handleAiAction}
-            onRegisterFlush={registerFlush}
-          />
+        {selectedNote ? (
+          selectedIsLocked ? (
+            <LockedNoteScreen
+              noteTitle={selectedNote.title}
+              onUnlock={() => requestUnlockForNote(selectedNote.id)}
+              ready={e2ee.ready}
+            />
+          ) : (
+            <NoteEditor
+              key={selectedNote.id}
+              note={selectedNote}
+              revision={editorRevision}
+              isEncrypted={selectedIsEncrypted}
+              onSave={handleSaveNote}
+              onRequestDelete={() => setDeleteTarget(selectedNote)}
+              onAiAction={handleAiAction}
+              onRegisterFlush={registerFlush}
+              onEncryptNote={
+                !selectedIsEncrypted ? () => requestEncryptNote(selectedNote.id) : undefined
+              }
+            />
+          )
         ) : (
           <EmptyState onCreate={handleCreateNote} onOpenAi={openAiPanel} />
         )}
@@ -491,16 +537,19 @@ export function Workspace({ user, initialNotes }: WorkspaceProps) {
         )}
         noteId={selectedId}
         openNote={
-          selectedNote
+          selectedNote && !selectedIsLocked
             ? { id: selectedNote.id, title: selectedNote.title, content: selectedNote.content }
             : null
         }
-        searchableNotes={notes.map((n) => ({
-          id: n.id,
-          title: n.title,
-          content: n.content,
-          updatedAt: n.updatedAt,
-        }))}
+        openNoteIsEncrypted={selectedIsEncrypted}
+        searchableNotes={notes
+          .filter((n) => n.decrypted !== false)
+          .map((n) => ({
+            id: n.id,
+            title: n.title,
+            content: n.content,
+            updatedAt: n.updatedAt,
+          }))}
         onBeforeSend={flushActiveNote}
         onClose={() => {
           setAiClosed(true);
@@ -510,34 +559,33 @@ export function Workspace({ user, initialNotes }: WorkspaceProps) {
         onNoteUpdated={handleAiNoteUpdated}
         onOpenNote={handleOpenNote}
         onApplyCreateNote={async ({ title, content }) => {
-          if (!e2ee.dek) throw new Error("Notes are locked.");
-          const enc = await e2ee.encryptContent(content);
+          // AI-created notes are plaintext by default unless created in context of encrypted workflow;
+          // keep simple: create as plaintext note.
           const response = await fetch("/api/notes", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              title,
-              encryptionVersion: 1,
-              contentCiphertext: enc.ciphertext,
-              contentIv: enc.iv,
-            }),
+            body: JSON.stringify({ title, content, encryptionVersion: 0 }),
           });
           if (!response.ok) throw new Error("Could not save note.");
           const data = (await response.json()) as { note: Note };
           return data.note.id;
         }}
         onApplyMutation={async ({ id, title, content }) => {
-          if (!e2ee.dek) throw new Error("Notes are locked.");
-          const enc = await e2ee.encryptContent(content);
+          // Save encrypted if target note is encrypted, else plaintext
+          const target = rawNotes.find((n) => n.id === id) ?? notes.find((n) => n.id === id);
+          const encrypted = target ? isEncryptedNote(target) : false;
+          let body: Record<string, unknown>;
+          if (encrypted) {
+            if (!e2ee.dek) throw new Error("Note is locked.");
+            const enc = await e2ee.encryptContent(content);
+            body = { title, encryptionVersion: 1, contentCiphertext: enc.ciphertext, contentIv: enc.iv };
+          } else {
+            body = { title, content, encryptionVersion: 0 };
+          }
           const response = await fetch(`/api/notes/${id}`, {
             method: "PATCH",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              title,
-              encryptionVersion: 1,
-              contentCiphertext: enc.ciphertext,
-              contentIv: enc.iv,
-            }),
+            body: JSON.stringify(body),
           });
           if (!response.ok) throw new Error("Could not save note.");
         }}
@@ -555,6 +603,33 @@ export function Workspace({ user, initialNotes }: WorkspaceProps) {
         onConfirm={handleConfirmDelete}
         onCancel={() => setDeleteTarget(null)}
       />
+
+      {keyDialog && (
+        <KeyDialog
+          mode={keyDialog.mode}
+          secret={keySecret}
+          setSecret={setKeySecret}
+          secretMode={keyMode}
+          setSecretMode={setKeyMode}
+          error={keyError}
+          loading={keyLoading}
+          onSubmit={handleKeySubmit}
+          onClose={() => {
+            if (keyLoading) return;
+            setKeyDialog(null);
+            setKeySecret("");
+            setKeyError(null);
+            pendingEncryptNoteIdRef.current = null;
+          }}
+        />
+      )}
+
+      {recoveryKeyShown && (
+        <RecoveryKeyDialog
+          recoveryKey={recoveryKeyShown}
+          onDone={() => setRecoveryKeyShown(null)}
+        />
+      )}
 
       {toast && (
         <div
@@ -578,48 +653,85 @@ export function Workspace({ user, initialNotes }: WorkspaceProps) {
   );
 }
 
-function UnlockScreen({
+function LockedNoteScreen({
+  noteTitle,
+  onUnlock,
+  ready,
+}: {
+  noteTitle: string;
+  onUnlock: () => void;
+  ready: boolean;
+}) {
+  return (
+    <div className="flex flex-1 items-center justify-center overflow-y-auto px-6 py-12">
+      <div className="w-full max-w-md rounded-2xl border border-line bg-paper/60 p-6 text-center shadow-sm">
+        <div className="mx-auto mb-4 grid size-12 place-items-center rounded-xl bg-amber-50 text-amber-700">
+          <Lock className="size-5" />
+        </div>
+        <h2 className="font-serif text-[28px] leading-tight tracking-tight text-ink">Encrypted note locked</h2>
+        <p className="mt-2 text-[13px] leading-6 text-ink-soft">
+          “{noteTitle.trim() || "Untitled note"}” is encrypted. Unlock your encryption key to view or edit its content.
+        </p>
+        <button
+          type="button"
+          onClick={onUnlock}
+          disabled={!ready}
+          className="mt-5 inline-flex h-10 items-center justify-center gap-2 rounded-xl bg-ink px-4 text-[12.5px] font-medium text-surface disabled:opacity-60"
+        >
+          <KeyRound className="size-4" /> Unlock
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function KeyDialog({
   mode,
   secret,
   setSecret,
+  secretMode,
+  setSecretMode,
   error,
   loading,
   onSubmit,
-  onSwitchMode,
+  onClose,
 }: {
-  mode: "setup" | "password" | "recovery";
+  mode: "setup" | "unlock";
   secret: string;
   setSecret: (v: string) => void;
+  secretMode: "password" | "recovery";
+  setSecretMode: (v: "password" | "recovery") => void;
   error: string | null;
   loading: boolean;
   onSubmit: (e: React.FormEvent) => void;
-  onSwitchMode: () => void;
+  onClose: () => void;
 }) {
   const isSetup = mode === "setup";
   return (
-    <div className="flex flex-1 items-center justify-center overflow-y-auto px-6 py-12">
-      <form onSubmit={onSubmit} className="w-full max-w-md rounded-2xl border border-line bg-paper/60 p-6 shadow-sm">
-        <div className="mb-4 grid size-12 place-items-center rounded-xl bg-accent-soft text-accent">
+    <div className="fixed inset-0 z-[70] flex items-center justify-center px-4" role="dialog" aria-modal="true">
+      <button type="button" className="absolute inset-0 bg-ink/25 backdrop-blur-[2px]" onClick={onClose} aria-label="Close dialog" />
+      <form onSubmit={onSubmit} className="animate-rise relative w-full max-w-md rounded-2xl border border-line bg-surface p-5 shadow-[0_30px_80px_-30px_rgba(33,31,27,0.45)]">
+        <div className="mb-3 grid size-10 place-items-center rounded-xl bg-accent-soft text-accent">
           {isSetup ? <ShieldCheck className="size-5" /> : <Lock className="size-5" />}
         </div>
-        <h2 className="font-serif text-[28px] leading-tight tracking-tight text-ink">
-          {isSetup ? "Set up encrypted notes" : "Unlock your notes"}
+        <h2 className="font-serif text-[25px] leading-tight tracking-tight text-ink">
+          {isSetup ? "Set up note encryption" : "Unlock encrypted notes"}
         </h2>
         <p className="mt-2 text-[13px] leading-6 text-ink-soft">
           {isSetup
-            ? "Enable end-to-end encryption so only you can read note content (titles stay visible for navigation). Enter your account password to protect your encryption key. If you forget this password and lose your recovery key, encrypted notes cannot be recovered."
-            : mode === "recovery"
-              ? "Enter your recovery key to unlock your encrypted notes on this device."
-              : "Enter your account password to decrypt your notes. End-to-end encryption means note content is unreadable without your key."}
+            ? "Enter your account password to create your encryption key. You’ll receive a one-time recovery key — save it. Without your password or recovery key, encrypted notes cannot be recovered."
+            : secretMode === "recovery"
+              ? "Enter your recovery key to unlock encrypted notes for this session."
+              : "Enter your account password to unlock encrypted notes for this session."}
         </p>
-        <label className="mt-5 block text-[12px] font-medium text-ink-soft">
-          {isSetup || mode === "password" ? "Account password" : "Recovery key"}
+        <label className="mt-4 block text-[12px] font-medium text-ink-soft">
+          {isSetup || secretMode === "password" ? "Account password" : "Recovery key"}
           <input
-            type={mode === "recovery" ? "text" : "password"}
+            type={secretMode === "recovery" ? "text" : "password"}
             value={secret}
             onChange={(e) => setSecret(e.target.value)}
-            className="mt-1.5 h-11 w-full rounded-xl border border-line bg-surface px-3.5 text-[13.5px] text-ink outline-none focus:border-accent/40 focus:ring-4 focus:ring-accent/10"
-            autoComplete={mode === "recovery" ? "off" : "current-password"}
+            className="mt-1.5 h-11 w-full rounded-xl border border-line bg-paper px-3.5 text-[13.5px] text-ink outline-none focus:border-accent/40 focus:ring-4 focus:ring-accent/10"
+            autoComplete={secretMode === "recovery" ? "off" : "current-password"}
             required
           />
         </label>
@@ -629,69 +741,54 @@ function UnlockScreen({
             <span>{error}</span>
           </div>
         )}
-        <button
-          type="submit"
-          disabled={loading}
-          className="mt-4 flex h-11 w-full items-center justify-center gap-2 rounded-xl bg-ink px-4 text-[13.5px] font-medium text-surface transition hover:bg-[#35312a] disabled:opacity-70"
-        >
-          {loading ? <Loader2 className="size-4 animate-spin" /> : <KeyRound className="size-4" />}
-          {isSetup ? "Enable encryption" : "Unlock"}
-        </button>
-        {!isSetup && (
-          <button
-            type="button"
-            onClick={onSwitchMode}
-            className="mt-3 w-full text-center text-[12px] font-medium text-accent-deep hover:underline"
-          >
-            {mode === "password" ? "Use recovery key instead" : "Use password instead"}
-          </button>
-        )}
+        <div className="mt-5 flex items-center justify-between gap-2">
+          {!isSetup ? (
+            <button
+              type="button"
+              onClick={() => setSecretMode(secretMode === "password" ? "recovery" : "password")}
+              className="text-[12px] font-medium text-accent-deep hover:underline"
+            >
+              {secretMode === "password" ? "Use recovery key" : "Use password"}
+            </button>
+          ) : <span />}
+          <div className="flex gap-2">
+            <button type="button" onClick={onClose} disabled={loading} className="h-9 rounded-lg px-3.5 text-[12.5px] font-medium text-ink-soft hover:bg-paper disabled:opacity-60">Cancel</button>
+            <button type="submit" disabled={loading} className="flex h-9 items-center gap-1.5 rounded-lg bg-ink px-3.5 text-[12.5px] font-medium text-white hover:bg-[#35312a] disabled:opacity-60">
+              {loading ? <Loader2 className="size-3.5 animate-spin" /> : <KeyRound className="size-3.5" />}
+              {isSetup ? "Enable & encrypt" : "Unlock"}
+            </button>
+          </div>
+        </div>
       </form>
     </div>
   );
 }
 
-function RecoveryKeyScreen({
-  recoveryKey,
-  onDone,
-}: {
-  recoveryKey: string;
-  onDone: () => void;
-}) {
+function RecoveryKeyDialog({ recoveryKey, onDone }: { recoveryKey: string; onDone: () => void }) {
   const [copied, setCopied] = useState(false);
   return (
-    <div className="flex flex-1 items-center justify-center overflow-y-auto px-6 py-12">
-      <div className="w-full max-w-md rounded-2xl border border-line bg-paper/60 p-6 shadow-sm">
-        <div className="mb-4 grid size-12 place-items-center rounded-xl bg-sage/10 text-sage">
+    <div className="fixed inset-0 z-[80] flex items-center justify-center px-4" role="dialog" aria-modal="true">
+      <div className="absolute inset-0 bg-ink/30 backdrop-blur-[2px]" />
+      <div className="animate-rise relative w-full max-w-md rounded-2xl border border-line bg-surface p-5 shadow-[0_30px_80px_-30px_rgba(33,31,27,0.45)]">
+        <div className="mb-3 grid size-10 place-items-center rounded-xl bg-sage/10 text-sage">
           <ShieldCheck className="size-5" />
         </div>
-        <h2 className="font-serif text-[28px] leading-tight tracking-tight text-ink">Save your recovery key</h2>
+        <h2 className="font-serif text-[25px] leading-tight tracking-tight text-ink">Save your recovery key</h2>
         <p className="mt-2 text-[13px] leading-6 text-ink-soft">
-          This key is shown <strong>once</strong>. Store it somewhere safe. If you forget your password, you’ll need this recovery key to unlock your encrypted notes. Without it, encrypted notes cannot be recovered.
+          This key is shown <strong>once</strong>. Store it somewhere safe. If you forget your password, you’ll need it to unlock encrypted notes.
         </p>
-        <div className="mt-4 rounded-xl border border-line bg-surface p-3 font-mono text-[12px] break-all text-ink">
-          {recoveryKey}
-        </div>
-        <div className="mt-3 flex gap-2">
+        <div className="mt-4 rounded-xl border border-line bg-paper p-3 font-mono text-[12px] break-all text-ink">{recoveryKey}</div>
+        <div className="mt-4 flex gap-2">
           <button
             type="button"
             onClick={async () => {
-              try {
-                await navigator.clipboard.writeText(recoveryKey);
-                setCopied(true);
-              } catch {}
+              try { await navigator.clipboard.writeText(recoveryKey); setCopied(true); } catch {}
             }}
-            className="flex h-10 flex-1 items-center justify-center gap-2 rounded-xl border border-line bg-surface px-3 text-[12.5px] font-medium text-ink-soft transition hover:text-ink"
+            className="flex h-9 flex-1 items-center justify-center gap-2 rounded-lg border border-line bg-surface text-[12.5px] font-medium text-ink-soft hover:text-ink"
           >
             <Copy className="size-4" /> {copied ? "Copied" : "Copy key"}
           </button>
-          <button
-            type="button"
-            onClick={onDone}
-            className="flex h-10 flex-1 items-center justify-center rounded-xl bg-ink px-3 text-[12.5px] font-medium text-surface"
-          >
-            I saved it
-          </button>
+          <button type="button" onClick={onDone} className="flex h-9 flex-1 items-center justify-center rounded-lg bg-ink text-[12.5px] font-medium text-white">I saved it</button>
         </div>
       </div>
     </div>
@@ -723,25 +820,13 @@ function EmptyState({
           Select a note from the sidebar, begin a blank page, or ask Lumen AI to draft something with you.
         </p>
         <div className="mt-7 flex flex-col justify-center gap-2.5 sm:flex-row">
-          <button
-            type="button"
-            onClick={onCreate}
-            className="flex h-10 items-center justify-center gap-2 rounded-xl bg-ink px-4 text-[12.5px] font-medium text-surface shadow-sm transition hover:bg-[#37332c]"
-          >
-            <Plus className="size-4" />
-            New note
+          <button type="button" onClick={onCreate} className="flex h-10 items-center justify-center gap-2 rounded-xl bg-ink px-4 text-[12.5px] font-medium text-surface shadow-sm transition hover:bg-[#37332c]">
+            <Plus className="size-4" /> New note
           </button>
-          <button
-            type="button"
-            onClick={onOpenAi}
-            className="flex h-10 items-center justify-center gap-2 rounded-xl border border-line bg-surface px-4 text-[12.5px] font-medium text-ink-soft shadow-sm transition hover:border-line-strong hover:text-ink"
-          >
-            <Sparkles className="size-4 text-accent" />
-            Ask Lumen AI
+          <button type="button" onClick={onOpenAi} className="flex h-10 items-center justify-center gap-2 rounded-xl border border-line bg-surface px-4 text-[12.5px] font-medium text-ink-soft shadow-sm transition hover:border-line-strong hover:text-ink">
+            <Sparkles className="size-4 text-accent" /> Ask Lumen AI
           </button>
         </div>
-        <div className="mx-auto mt-10 h-px w-24 bg-line" />
-        <p className="mt-4 text-[10.5px] uppercase tracking-[0.2em] text-muted">Write · Think · Let it save</p>
       </div>
     </div>
   );

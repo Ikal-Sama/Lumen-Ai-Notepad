@@ -1,45 +1,31 @@
-# Undo + Note E2EE Plan
+# Undo + Note Encryption Plan
 
-## Decisions (confirmed)
-- **Undo:** Undo button only (no Redo). `Ctrl/Cmd+Z` supported. History is coalesced, bounded, and cleared on note switch and on AI-driven note refresh (`revision`). Undo marks the note dirty and participates in existing autosave/flush.
-- **Encryption:** True client-side E2EE (zero-knowledge) for note **content**. Note **titles remain plaintext**. Server/DB stores ciphertext + crypto metadata only; keys are held client-side.
-- **Recovery:** One-time **Recovery Key** generated at encryption setup and shown once for the user to save. Recovery path can restore/unlock wrapped data key without the original password (implementation detail documented with key-wrapping scheme).
-- **AI:** Show a sensitive-data confirmation warning **once per session** before the first AI action that uses/sends note content (chat send, retry/regenerate, quick actions). Warning states decrypted content may be sent to the AI service for that request. User must confirm to proceed.
-- **Migration:** Existing plaintext notes are migrated to encrypted form on first successful unlock for a user.
-- **Branch:** Single branch `feature/undo-and-note-e2ee`.
+## Current state (merged baseline)
+- Editor undo: Undo button + `Ctrl/Cmd+Z`, coalesced/bounded history, clears on AI `revision`/note switch.
+- E2EE foundation: `user_encryption_key` + encrypted note fields/migration, client crypto (AES-GCM, PBKDF2 KEK, wrapped DEK, one-time recovery key), key API, decrypt/encrypt flows, chat adapted to client-decrypted context with encrypted persistence for AI mutations.
+- **Current behavior to change:** encryption is effectively global/workspace-wide (unlock/setup gates workspace, new notes encrypted, legacy notes auto-migrated on unlock), AI sensitive-data warning is a `window.confirm` shown once per session for AI use.
 
-## Problems
-1. Editor lacks explicit undo/history resilient to programmatic edits and autosave flows.
-2. Notes (`title` plaintext, `content` currently plaintext in DB/APIs/AI tools) are readable by anyone with DB/server access; requirement is confidentiality even from developers/admins with DB access.
+## New confirmed decisions (per-note opt-in refactor)
+- **Encryption scope:** opt-in **per note** (user selects which note to encrypt). Plaintext notes remain accessible without encryption unlock. New notes are plaintext by default unless encrypted explicitly.
+- **One-way:** once a note is encrypted, it **cannot** be converted back to plaintext.
+- **Key management:** keep per-user key material + one-time recovery key. Setup occurs on first encrypt action if needed; unlock is prompted when accessing/using an encrypted note while locked (not a global workspace gate).
+- **Existing encrypted notes:** keep them encrypted as opt-in encrypted notes.
+- **AI warning:** replace native `window.confirm` with an in-app **AlertDialog** UI. Show warning **only** when the AI action uses/sends content of an **encrypted** note, **once per note per session**. No warning for plaintext notes.
+- **AI results:** if the target/open note is encrypted, AI-created/updated content is saved **encrypted**.
 
-## Solution overview
-
-### Phase 1 — Editor Undo
-- Add coalesced in-memory undo stack of `{title, content}` snapshots in `src/components/workspace/note-editor.tsx`.
-- Add Undo toolbar button (disabled when unavailable) and keyboard shortcut.
-- Keep refs/state/save status consistent; clear history on note change/remount and `revision` updates.
-
-### Phase 2 — E2EE model
-- Client-side crypto (Web Crypto): per-user DEK (AES-GCM) for note content; KEK derived from password (KDF with per-user salt/params) wraps DEK. Store wrapped key material + verifier + params server-side, scoped to user. Recovery Key provides an alternate unwrap path.
-- DB/schema: key-material table and encrypted content fields/metadata for notes; titles remain plaintext.
-- APIs/page load transport ciphertext for content; server never decrypts.
-
-### Phase 3 — Unlock & migration
-- Capture password at sign-in/sign-up/setup to establish/unlock keys; prompt unlock on session restore (keys kept in memory).
-- Encrypt on create/save/flush; decrypt on load after unlock.
-- Migrate legacy plaintext note content to encrypted on first unlock.
-
-### Phase 4 — AI integration
-- Once-per-session sensitive-data confirmation before AI actions that use note content.
-- Adapt chat/editor/workspace so AI operates on client-decrypted context/results are re-encrypted before persistence. Server-side plaintext `searchNotes` over content must be reworked (client-side over decrypted notes) or limited; document behavior.
+## Solution (refactor)
+1. **AlertDialog + warning logic:** generalize/extend dialog component for warning tone; track acknowledged encrypted note IDs per session; gate AI send/retry/quick actions on encrypted-note warning only.
+2. **Per-note encryption UX/data flow:** add "Encrypt note" action and encrypted/locked indicators; encrypt selected note on demand (setup/unlock prompts as needed), persist per-note `encryptionVersion/ciphertext/iv`; stop auto-encrypting all notes and stop global unlock gate/auto-migration.
+3. **Reads/writes:** decrypt only encrypted notes when key is available; allow plaintext notes to function without DEK. Save plaintext vs encrypted payload based on note state (encrypted stays encrypted).
+4. **AI integration:** include/provide decrypted content only for accessible notes as appropriate; require unlock before AI on a locked encrypted note; persist mutations according to target note encryption state.
 
 ## Files expected to change
-- Editor/UI: `src/components/workspace/note-editor.tsx`, `src/components/workspace/workspace.tsx`, `src/components/workspace/ai-chat-panel.tsx`, possibly sidebar/auth UI for unlock/recovery flows.
-- Crypto/lib: new `src/lib/crypto/*` or `src/lib/e2ee/*`, `src/lib/notes.ts`, `src/lib/types.ts`, auth/session touchpoints as needed.
-- Data/API: `src/db/schema.ts`, `drizzle/*` migrations, `src/app/api/notes/route.ts`, `src/app/api/notes/[id]/route.ts`, `src/app/api/chat/route.ts`, `src/app/page.tsx`.
-- Docs: `README.md`, this plan.
+- `src/components/workspace/confirm-dialog.tsx` (or new alert dialog) and `src/components/workspace/ai-chat-panel.tsx`
+- `src/components/workspace/workspace.tsx`, `src/components/workspace/note-editor.tsx`, `src/components/workspace/note-sidebar.tsx`
+- `src/lib/e2ee/context.tsx`, `src/lib/notes.ts`, `src/lib/types.ts`, `src/app/page.tsx`
+- `src/app/api/notes/route.ts`, `src/app/api/notes/[id]/route.ts`, `src/app/api/chat/route.ts` (as needed)
+- `README.md`, this plan
 
-## Implementation status (this branch)
-- **Done:** Undo (toolbar + `Ctrl/Cmd+Z`, coalesced history, clears on AI revision), once-per-session AI sensitive-data confirmation, E2EE schema/migration (`user_encryption_key`, encrypted note fields), client crypto primitives + recovery key, key storage API, workspace unlock/setup/recovery UI, encrypted note create/save/fetch/decrypt flow, legacy plaintext migration on unlock, chat flow adapted to client-provided decrypted context with client-side encrypted persistence for AI mutations.
-- **Notes/limits:** unlock/setup currently prompts for the account password in the workspace (required on reload/new setup); OAuth-only accounts without a usable password need a dedicated passphrase flow to be fully supported. Server-side `searchNotes` over DB content is replaced by client-provided decrypted-session search context.
-- **Testing approach:** manual undo/E2EE setup-unlock-recovery/CRUD/migration/AI flows + DB ciphertext verification. Quality gate before merge: `npm run lint`, `npm run typecheck`, `npm run build`.
+## Testing approach
+- Manual: encrypt a specific note (setup+recovery first time), unlock prompt for encrypted note on reload, plaintext notes unaffected, one-way encryption, save/create/edit/delete for both, undo, AI warning AlertDialog only for encrypted notes once per note per session, AI results saved encrypted for encrypted targets, existing encrypted notes remain encrypted.
+- Quality gate: `npm run lint`, `npm run typecheck`, `npm run build`.

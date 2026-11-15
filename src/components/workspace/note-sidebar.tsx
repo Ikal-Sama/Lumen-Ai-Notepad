@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import {
   FileText,
   Loader2,
+  Lock,
   LogOut,
   Plus,
   Search,
@@ -164,15 +165,22 @@ export function NoteSidebar({
                   >
                     {note.title.trim() || "Untitled note"}
                   </span>
-                  <span
-                    className="shrink-0 text-[10px] tabular-nums text-muted"
-                    suppressHydrationWarning
-                  >
-                    {formatNoteDate(note.updatedAt)}
+                  <span className="flex shrink-0 items-center gap-1">
+                    {(note.encryptionVersion ?? 0) > 0 && (
+                      <Lock className="size-3 text-muted" aria-label="Encrypted note" />
+                    )}
+                    <span
+                      className="text-[10px] tabular-nums text-muted"
+                      suppressHydrationWarning
+                    >
+                      {formatNoteDate(note.updatedAt)}
+                    </span>
                   </span>
                 </div>
                 <p className="mt-1 line-clamp-2 text-[11.5px] leading-[1.55] text-ink-soft/65">
-                  {getSnippet(note.content)}
+                  {(note.encryptionVersion ?? 0) > 0 && note.decrypted === false
+                    ? "Encrypted note — unlock to view"
+                    : getSnippet(note.content)}
                 </p>
               </button>
             );
