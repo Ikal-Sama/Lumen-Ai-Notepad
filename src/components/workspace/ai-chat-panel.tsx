@@ -9,7 +9,11 @@ import {
   ArrowUpRight,
   Check,
   FileText,
+  Image as ImageIcon,
   Loader2,
+  Mic,
+  MicOff,
+  Paperclip,
   RotateCcw,
   Search,
   Sparkles,
@@ -74,10 +78,25 @@ export function AiChatPanel({
   registerSend,
 }: AiChatPanelProps) {
   const [input, setInput] = useState("");
+  const [attachments, setAttachments] = useState<File[]>([]);
+  const [listening, setListening] = useState(false);
+  const [speechSupported] = useState(
+    () =>
+      typeof window !== "undefined" &&
+      Boolean(
+        (window as unknown as { SpeechRecognition?: unknown; webkitSpeechRecognition?: unknown })
+          .SpeechRecognition ||
+          (window as unknown as { SpeechRecognition?: unknown; webkitSpeechRecognition?: unknown })
+            .webkitSpeechRecognition,
+      ),
+  );
   const [sendError, setSendError] = useState<string | null>(null);
   const [preparing, setPreparing] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const recognitionRef = useRef<{ stop?: () => void } | null>(null);
+  const dictationBaseRef = useRef("");
   const createdRef = useRef(onNoteCreated);
   const updatedRef = useRef(onNoteUpdated);
   const applyCreateRef = useRef(onApplyCreateNote);
@@ -148,7 +167,104 @@ export function AiChatPanel({
     if (!element) return;
     element.style.height = "auto";
     element.style.height = `${Math.min(element.scrollHeight, 132)}px`;
-  }, [input]);
+  }, [input, attachments.length]);
+
+  useEffect(() => {
+    return () => {
+      try {
+        const rec = recognitionRef.current as { stop?: () => void } | null;
+        rec?.stop?.();
+      } catch {
+        // ignore
+      }
+      recognitionRef.current = null;
+    };
+  }, []);
+
+  function toggleVoiceDictation() {
+    if (typeof window === "undefined") return;
+    type SpeechRecognitionEventLike = {
+      results: ArrayLike<
+        ArrayLike<{ transcript: string }> & { isFinal: boolean; 0: { transcript: string } }
+      >;
+    };
+    type SpeechRecognitionLike = {
+      continuous: boolean;
+      interimResults: boolean;
+      lang: string;
+      onresult: ((event: SpeechRecognitionEventLike) => void) | null;
+      onerror: (() => void) | null;
+      onend: (() => void) | null;
+      start: () => void;
+      stop: () => void;
+    };
+    const w = window as unknown as {
+      SpeechRecognition?: new () => SpeechRecognitionLike;
+      webkitSpeechRecognition?: new () => SpeechRecognitionLike;
+    };
+    const SpeechRecognitionCtor = w.SpeechRecognition || w.webkitSpeechRecognition;
+    if (!SpeechRecognitionCtor) return;
+
+    if (listening && recognitionRef.current) {
+      try {
+        recognitionRef.current.stop?.();
+      } catch {
+        // ignore
+      }
+      setListening(false);
+      return;
+    }
+
+    const recognition = SpeechRecognitionCtor ? new SpeechRecognitionCtor() : null;
+    if (!recognition) return;
+    recognitionRef.current = recognition;
+    recognition.continuous = true;
+    recognition.interimResults = true;
+    recognition.lang =
+      typeof navigator !== "undefined" ? navigator.language || "en-US" : "en-US";
+    dictationBaseRef.current = input;
+
+    let finalTranscript = "";
+    recognition.onresult = (event) => {
+      let interim = "";
+      for (let i = 0; i < event.results.length; i++) {
+        const result = event.results[i];
+        const transcript = result?.[0]?.transcript ?? "";
+        if (result?.isFinal) finalTranscript += transcript;
+        else interim += transcript;
+      }
+      const sessionText = `${finalTranscript}${interim}`.trim();
+      const base = dictationBaseRef.current.replace(/\s+$/, "");
+      setInput(sessionText ? (base ? `${base} ${sessionText}` : sessionText) : base);
+    };
+    recognition.onerror = () => {
+      setListening(false);
+      recognitionRef.current = null;
+    };
+    recognition.onend = () => {
+      setListening(false);
+      if (recognitionRef.current === recognition) recognitionRef.current = null;
+    };
+
+    try {
+      recognition.start();
+      setListening(true);
+    } catch {
+      setListening(false);
+      recognitionRef.current = null;
+    }
+  }
+
+  function onPickFiles(event: React.ChangeEvent<HTMLInputElement>) {
+    const files = Array.from(event.target.files ?? []);
+    if (files.length === 0) return;
+    setAttachments((prev) => [...prev, ...files].slice(0, 10));
+    event.target.value = "";
+  }
+
+  function removeAttachment(index: number) {
+    setAttachments((prev) => prev.filter((_, i) => i !== index));
+  }
 
   function requiresEncryptedNoteWarning() {
     return Boolean(openNoteIsEncrypted && noteId);
@@ -168,7 +284,7 @@ export function AiChatPanel({
     setWarningOpen(true);
   }
 
-  async function doSubmit(value: string) {
+  async function doSubmit(value: string, files: File[]) {
     submittingRef.current = true;
     setSendError(null);
     setPreparing(true);
@@ -189,17 +305,21 @@ export function AiChatPanel({
     }
 
     setInput("");
-    void sendMessage(
-      { text: value },
-      { body: { noteId, openNote: openNote ?? null, searchableNotes } },
-    );
+    setAttachments([]);
+    const message =
+      files.length > 0 ? { text: value || " ", files } : { text: value };
+    void sendMessage(message as Parameters<typeof sendMessage>[0], {
+      body: { noteId, openNote: openNote ?? null, searchableNotes },
+    });
   }
 
   async function submit(text?: string) {
     const value = (text ?? input).trim();
-    if (!value || busy || preparing || submittingRef.current) return;
+    const files = [...attachments];
+    if ((!value && files.length === 0) || busy || preparing || submittingRef.current)
+      return;
     requestWithConsent(() => {
-      void doSubmit(value);
+      void doSubmit(value || "Please analyze the attached file(s).", files);
     });
   }
 
@@ -444,6 +564,65 @@ export function AiChatPanel({
                       );
                     }
 
+                    const partType = (part as { type?: string }).type;
+                    if (partType === "file" || partType === "image") {
+                      const p = part as {
+                        url?: string;
+                        data?: string;
+                        image?: string;
+                        mediaType?: string;
+                        mimeType?: string;
+                        filename?: string;
+                        name?: string;
+                        type?: string;
+                      };
+                      const url = p.url || p.data || p.image;
+                      const mediaType = p.mediaType || p.mimeType || "";
+                      const name = p.filename || p.name || "Attachment";
+                      const isImage =
+                        (p.type === "image" || String(mediaType).startsWith("image/")) && url;
+                      if (isImage) {
+                        return (
+                          <a
+                            key={`${message.id}-file-${index}`}
+                            href={url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className={cn(
+                              "block overflow-hidden rounded-xl border border-line bg-surface",
+                              isUser ? "max-w-[240px]" : "max-w-[280px]",
+                            )}
+                          >
+                            <img
+                              src={url}
+                              alt={name}
+                              className="max-h-48 w-full object-cover"
+                            />
+                          </a>
+                        );
+                      }
+                      if (url) {
+                        return (
+                          <a
+                            key={`${message.id}-file-${index}`}
+                            href={url}
+                            target={String(url).startsWith("data:") ? undefined : "_blank"}
+                            rel="noopener noreferrer"
+                            download={name}
+                            className={cn(
+                              "flex items-center gap-2 rounded-xl border px-3 py-2 text-[11.5px] transition",
+                              isUser
+                                ? "border-white/10 bg-white/10 text-surface hover:bg-white/15"
+                                : "border-line bg-surface text-ink-soft hover:bg-paper/60 hover:text-ink",
+                            )}
+                          >
+                            <FileText className="size-4 shrink-0 opacity-80" />
+                            <span className="min-w-0 truncate">{name}</span>
+                          </a>
+                        );
+                      }
+                    }
+
                     return null;
                   })}
                 </div>
@@ -495,6 +674,31 @@ export function AiChatPanel({
         )}
 
         <div className="rounded-2xl border border-line bg-surface p-2 shadow-[0_1px_2px_rgba(33,31,27,0.04)] transition focus-within:border-accent/35 focus-within:ring-4 focus-within:ring-accent/10">
+          {attachments.length > 0 && (
+            <div className="mb-1 flex flex-wrap gap-1.5 px-1 pt-1">
+              {attachments.map((file, index) => (
+                <span
+                  key={`${file.name}-${file.size}-${index}`}
+                  className="inline-flex max-w-full items-center gap-1.5 rounded-lg border border-line bg-[#faf8f3] px-2 py-1 text-[10.5px] text-ink-soft"
+                >
+                  {file.type.startsWith("image/") ? (
+                    <ImageIcon className="size-3 shrink-0 text-muted" />
+                  ) : (
+                    <FileText className="size-3 shrink-0 text-muted" />
+                  )}
+                  <span className="max-w-[140px] truncate">{file.name}</span>
+                  <button
+                    type="button"
+                    onClick={() => removeAttachment(index)}
+                    className="grid size-4 place-items-center rounded text-muted transition hover:bg-white hover:text-ink"
+                    aria-label={`Remove ${file.name}`}
+                  >
+                    <X className="size-3" />
+                  </button>
+                </span>
+              ))}
+            </div>
+          )}
           <textarea
             ref={inputRef}
             value={input}
@@ -510,15 +714,56 @@ export function AiChatPanel({
               }
             }}
             rows={1}
-            placeholder="Ask anything, or say “create a note…”"
+            placeholder="Ask anything, attach a file, or say “create a note…”"
             aria-label="Message the AI assistant"
             disabled={working}
             className="no-resize max-h-[132px] min-h-[42px] w-full overflow-y-auto bg-transparent px-2 py-2 text-[12.5px] leading-5 text-ink outline-none placeholder:text-muted/75 disabled:opacity-60"
           />
           <div className="flex items-center justify-between gap-2 px-1 pb-0.5 pt-1">
-            <p className="text-[9.5px] text-muted/90">
-              Enter to send · Shift+Enter for a new line
-            </p>
+            <div className="flex items-center gap-0.5">
+              <input
+                ref={fileInputRef}
+                type="file"
+                multiple
+                className="hidden"
+                onChange={onPickFiles}
+                accept="image/*,.txt,.md,.markdown,.pdf,.csv,.json"
+              />
+              <button
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                disabled={working}
+                className="grid size-7 place-items-center rounded-lg text-muted transition hover:bg-[#f7f4ed] hover:text-ink disabled:opacity-50"
+                aria-label="Attach files"
+                title="Attach files"
+              >
+                <Paperclip className="size-4" />
+              </button>
+              <button
+                type="button"
+                onClick={toggleVoiceDictation}
+                disabled={working || !speechSupported}
+                className={cn(
+                  "grid size-7 place-items-center rounded-lg transition disabled:opacity-50",
+                  listening
+                    ? "bg-red-50 text-red-600 hover:bg-red-100"
+                    : "text-muted hover:bg-[#f7f4ed] hover:text-ink",
+                )}
+                aria-label={listening ? "Stop voice dictation" : "Start voice dictation"}
+                title={
+                  speechSupported
+                    ? listening
+                      ? "Stop dictation"
+                      : "Dictate with voice"
+                    : "Voice dictation not supported in this browser"
+                }
+              >
+                {listening ? <MicOff className="size-4" /> : <Mic className="size-4" />}
+              </button>
+              <p className="ml-1 hidden text-[9.5px] text-muted/90 sm:block">
+                Enter to send · Shift+Enter for a new line
+              </p>
+            </div>
             {busy ? (
               <button
                 type="button"
@@ -533,7 +778,7 @@ export function AiChatPanel({
               <button
                 type="button"
                 onClick={() => submit()}
-                disabled={!input.trim() || working}
+                disabled={(!input.trim() && attachments.length === 0) || working}
                 className="grid size-7 place-items-center rounded-full bg-ink text-surface transition hover:bg-[#37332c] disabled:cursor-not-allowed disabled:bg-line-strong disabled:text-surface"
                 aria-label="Send message"
                 title="Send message"

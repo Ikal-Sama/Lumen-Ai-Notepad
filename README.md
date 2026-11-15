@@ -11,8 +11,9 @@ A calm, three-panel notebook built with the Next.js App Router. Write Markdown, 
 - **Opt-in per-note encryption (E2EE)** — encrypt individual notes in the browser (ciphertext stored in DB, titles remain plaintext). One-time recovery key at setup; one-way once enabled; unlock prompted on demand for encrypted notes.
 - **Three-panel workspace** — notes sidebar, Markdown editor, collapsible AI chat
 - **Markdown editing** with auto-save, manual save (`Ctrl/Cmd + S`), undo (`Ctrl/Cmd + Z`), preview, and formatting toolbar
-- **AI tool calling** — create notes (`createNote`), read, rewrite, or append to the open note (`updateNote`, `appendToNote`), and search across notes available in the current session (`searchNotes`)
-- **AI quick actions** — Improve, Summarize, and Continue buttons send the open note to the assistant after flushing unsaved edits (with an in-app warning for encrypted notes, once per encrypted note per session)
+- **AI tool calling** - create notes (`createNote`), read, rewrite, or append to the open note (`updateNote`, `appendToNote`), and search across notes available in the current session (`searchNotes`)
+- **AI voice & attachments** - dictate prompts with the mic (browser speech recognition where supported) and attach images/files to chat messages for multimodal-capable models
+- **AI quick actions** - Improve, Summarize, and Continue buttons send the open note to the assistant after flushing unsaved edits (with an in-app warning for encrypted notes, once per encrypted note per session)
 - **Real-time sync** — when the AI creates or edits a note, the sidebar and editor refresh automatically
 - **Responsive** — the sidebar and AI panel become overlays on small screens
 
