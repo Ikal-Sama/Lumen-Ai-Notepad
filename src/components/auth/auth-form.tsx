@@ -341,8 +341,8 @@ export function AuthForm({ mode }: AuthFormProps) {
       {!isNativeApp && (
         <div className="mt-4 flex justify-center">
           <a
-            href="/app-debug.apk"
-            download
+            href="/lumen.apk"
+            download="lumen.apk"
             className="flex h-10 items-center gap-2 rounded-xl border border-line bg-surface px-4 text-[12.5px] font-medium text-ink-soft transition hover:border-line-strong hover:text-ink focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-accent/20"
           >
             <Download className="size-4" />
