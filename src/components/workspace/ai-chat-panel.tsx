@@ -257,7 +257,9 @@ export function AiChatPanel({
       } else if (code === "audio-capture") {
         setSendError("No microphone was found. Check your device mic and try again.");
       } else if (code === "network") {
-        setSendError("Voice dictation network error. Check your connection and try again.");
+        setSendError(
+          "Voice dictation couldn’t reach the speech recognition service. This can happen even with internet access if the service is unavailable, blocked, or not supported in this WebView.",
+        );
       } else if (code && code !== "aborted") {
         setSendError("Voice dictation couldn’t start. Please try again.");
       }
