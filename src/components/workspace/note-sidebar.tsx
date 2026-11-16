@@ -94,7 +94,12 @@ export function NoteSidebar({
 
   function handleAddAccount() {
     setAccountOpen(false);
-    router.push("/sign-in");
+    router.push("/sign-in?add=1");
+  }
+
+  function handleSwitchAccount() {
+    setAccountOpen(false);
+    router.push("/sign-in?switch=1");
   }
 
   return (
@@ -273,7 +278,7 @@ export function NoteSidebar({
                 </button>
                 <button
                   type="button"
-                  onClick={handleAddAccount}
+                  onClick={handleSwitchAccount}
                   className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-[12.5px] text-ink-soft transition hover:bg-[#f7f4ed] hover:text-ink"
                 >
                   <UserPlus className="size-4 text-muted" />

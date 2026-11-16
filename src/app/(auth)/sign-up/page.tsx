@@ -8,9 +8,15 @@ export const metadata: Metadata = {
   title: "Create an account",
 };
 
-export default async function SignUpPage() {
+export default async function SignUpPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ add?: string; switch?: string }>;
+}) {
+  const params = await searchParams;
   const session = await getSession();
-  if (session) redirect("/");
+  const allowAdditional = params.add === "1" || params.switch === "1";
+  if (session && !allowAdditional) redirect("/");
 
   return <AuthForm mode="sign-up" />;
 }

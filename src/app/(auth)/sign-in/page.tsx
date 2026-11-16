@@ -8,9 +8,15 @@ export const metadata: Metadata = {
   title: "Sign in",
 };
 
-export default async function SignInPage() {
+export default async function SignInPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ add?: string; switch?: string }>;
+}) {
+  const params = await searchParams;
   const session = await getSession();
-  if (session) redirect("/");
+  const allowAdditional = params.add === "1" || params.switch === "1";
+  if (session && !allowAdditional) redirect("/");
 
   return <AuthForm mode="sign-in" />;
 }

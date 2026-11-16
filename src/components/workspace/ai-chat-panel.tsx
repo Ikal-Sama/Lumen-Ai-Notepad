@@ -188,12 +188,13 @@ export function AiChatPanel({
         ArrayLike<{ transcript: string }> & { isFinal: boolean; 0: { transcript: string } }
       >;
     };
+    type SpeechRecognitionErrorLike = { error?: string };
     type SpeechRecognitionLike = {
       continuous: boolean;
       interimResults: boolean;
       lang: string;
       onresult: ((event: SpeechRecognitionEventLike) => void) | null;
-      onerror: (() => void) | null;
+      onerror: ((event: SpeechRecognitionErrorLike) => void) | null;
       onend: (() => void) | null;
       start: () => void;
       stop: () => void;
@@ -203,7 +204,10 @@ export function AiChatPanel({
       webkitSpeechRecognition?: new () => SpeechRecognitionLike;
     };
     const SpeechRecognitionCtor = w.SpeechRecognition || w.webkitSpeechRecognition;
-    if (!SpeechRecognitionCtor) return;
+    if (!SpeechRecognitionCtor) {
+      setSendError("Voice dictation isn’t supported in this browser.");
+      return;
+    }
 
     if (listening && recognitionRef.current) {
       try {
@@ -215,14 +219,14 @@ export function AiChatPanel({
       return;
     }
 
-    const recognition = SpeechRecognitionCtor ? new SpeechRecognitionCtor() : null;
-    if (!recognition) return;
+    const recognition = new SpeechRecognitionCtor();
     recognitionRef.current = recognition;
     recognition.continuous = true;
     recognition.interimResults = true;
     recognition.lang =
       typeof navigator !== "undefined" ? navigator.language || "en-US" : "en-US";
     dictationBaseRef.current = input;
+    setSendError(null);
 
     let finalTranscript = "";
     recognition.onresult = (event) => {
@@ -237,9 +241,17 @@ export function AiChatPanel({
       const base = dictationBaseRef.current.replace(/\s+$/, "");
       setInput(sessionText ? (base ? `${base} ${sessionText}` : sessionText) : base);
     };
-    recognition.onerror = () => {
+    recognition.onerror = (event) => {
       setListening(false);
       recognitionRef.current = null;
+      const code = event?.error;
+      if (code === "not-allowed" || code === "service-not-allowed") {
+        setSendError("Microphone access was blocked. Allow mic permission to use voice dictation.");
+      } else if (code === "no-speech") {
+        setSendError("No speech detected. Try again and speak clearly.");
+      } else if (code && code !== "aborted") {
+        setSendError("Voice dictation couldn’t start. Please try again.");
+      }
     };
     recognition.onend = () => {
       setListening(false);
@@ -252,6 +264,7 @@ export function AiChatPanel({
     } catch {
       setListening(false);
       recognitionRef.current = null;
+      setSendError("Voice dictation couldn’t start in this browser.");
     }
   }
 
