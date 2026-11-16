@@ -7,6 +7,19 @@ import { getSession } from "@/lib/session";
 
 export const maxDuration = 60;
 
+function resolveTranscriptionModel() {
+  const provider = (process.env.AI_PROVIDER ?? "openai").toLowerCase();
+  const override = process.env.AI_TRANSCRIPTION_MODEL?.trim();
+
+  if (provider === "google") {
+    const modelId = override || "gemini-3.5-transcribe";
+    return google.transcription(modelId);
+  }
+
+  const modelId = override || "whisper-1";
+  return openai.transcription(modelId);
+}
+
 export async function POST(request: Request) {
   const session = await getSession();
   if (!session) {
@@ -34,32 +47,14 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Audio file is too large (max 20MB)." }, { status: 413 });
   }
 
-  const provider = (process.env.AI_PROVIDER ?? "openai").toLowerCase();
-  const transcriptionModelId =
-    process.env.AI_TRANSCRIPTION_MODEL ||
-    (provider === "openai" ? "whisper-1" : "");
-
   try {
-    if (provider === "openai" || !provider || transcriptionModelId) {
-      if (!process.env.OPENAI_API_KEY && provider !== "google") {
-        // fall through to explicit error below
-      }
-      const modelId = transcriptionModelId || "whisper-1";
-      const audio = new Uint8Array(await file.arrayBuffer());
-      const result = await transcribe({
-        model: openai.transcription(modelId),
-        audio,
-      });
-      const text = String(result.text ?? "").trim();
-      return NextResponse.json({ text });
-    }
-
-    // Google provider currently may not expose a transcription model in this setup.
-    // If GOOGLE is selected but no compatible transcription path is available, return a clear error.
-    return NextResponse.json(
-      { error: "Transcription is not configured for the selected AI provider. Set OPENAI_API_KEY and/or AI_TRANSCRIPTION_MODEL." },
-      { status: 501 },
-    );
+    const audio = new Uint8Array(await file.arrayBuffer());
+    const result = await transcribe({
+      model: resolveTranscriptionModel(),
+      audio,
+    });
+    const text = String(result.text ?? "").trim();
+    return NextResponse.json({ text });
   } catch (error) {
     const message =
       error instanceof Error ? error.message : "Failed to transcribe audio.";
