@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
+  Check,
   ChevronDown,
   FileText,
   Loader2,
@@ -35,6 +36,16 @@ type NoteSidebarProps = {
   onSelect: (id: string) => void;
 };
 
+type DeviceAccountSession = {
+  sessionToken: string;
+  user: {
+    id: string;
+    name?: string | null;
+    email?: string | null;
+    image?: string | null;
+  };
+};
+
 export function NoteSidebar({
   notes,
   selectedId,
@@ -48,7 +59,10 @@ export function NoteSidebar({
   const router = useRouter();
   const [query, setQuery] = useState("");
   const [signingOut, setSigningOut] = useState(false);
+  const [switchingToken, setSwitchingToken] = useState<string | null>(null);
   const [accountOpen, setAccountOpen] = useState(false);
+  const [deviceSessions, setDeviceSessions] = useState<DeviceAccountSession[]>([]);
+  const [loadingAccounts, setLoadingAccounts] = useState(false);
   const accountRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
@@ -69,6 +83,91 @@ export function NoteSidebar({
       document.removeEventListener("keydown", onKeyDown);
     };
   }, [accountOpen]);
+
+  useEffect(() => {
+    if (!accountOpen) return;
+    let cancelled = false;
+    (async () => {
+      setLoadingAccounts(true);
+      try {
+        const ms = (
+          authClient as unknown as {
+            multiSession?: {
+              listDeviceSessions?: () => Promise<unknown>;
+            };
+          }
+        ).multiSession;
+        const res = await ms?.listDeviceSessions?.();
+        const rawUnknown: unknown = Array.isArray(res)
+          ? res
+          : res && typeof res === "object" && Array.isArray((res as { data?: unknown }).data)
+            ? (res as { data: unknown[] }).data
+            : [];
+        const raw = Array.isArray(rawUnknown) ? rawUnknown : [];
+        const mapped = raw
+          .map((item): DeviceAccountSession | null => {
+            const obj = item && typeof item === "object" ? (item as Record<string, unknown>) : null;
+            const sessionObj =
+              obj?.session && typeof obj.session === "object"
+                ? (obj.session as Record<string, unknown>)
+                : obj;
+            const uObj =
+              (obj?.user && typeof obj.user === "object"
+                ? (obj.user as Record<string, unknown>)
+                : sessionObj?.user && typeof sessionObj.user === "object"
+                  ? (sessionObj.user as Record<string, unknown>)
+                  : null) ?? null;
+            const token =
+              (sessionObj?.token ?? sessionObj?.sessionToken ?? obj?.sessionToken) as
+                | string
+                | undefined;
+            const id = uObj?.id as string | number | undefined;
+            if (!token || id == null) return null;
+            return {
+              sessionToken: String(token),
+              user: {
+                id: String(id),
+                name: (uObj?.name as string | null | undefined) ?? null,
+                email: (uObj?.email as string | null | undefined) ?? null,
+                image: (uObj?.image as string | null | undefined) ?? null,
+              },
+            };
+          })
+          .filter((s): s is DeviceAccountSession => Boolean(s));
+
+        const seen = new Set<string>();
+        const deduped = mapped.filter((s) => {
+          if (seen.has(s.user.id)) return false;
+          seen.add(s.user.id);
+          return true;
+        });
+
+        if (!cancelled) setDeviceSessions(deduped);
+      } catch {
+        if (!cancelled) setDeviceSessions([]);
+      } finally {
+        if (!cancelled) setLoadingAccounts(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [accountOpen]);
+
+  const accountsToShow = useMemo(() => {
+    if (deviceSessions.length > 0) return deviceSessions;
+    return [
+      {
+        sessionToken: "current",
+        user: {
+          id: user.id,
+          name: user.name,
+          email: user.email,
+          image: user.image ?? null,
+        },
+      },
+    ];
+  }, [deviceSessions, user]);
 
   const filteredNotes = useMemo(() => {
     const needle = query.trim().toLowerCase();
@@ -97,9 +196,29 @@ export function NoteSidebar({
     router.push("/sign-in?add=1");
   }
 
-  function handleSwitchAccount() {
-    setAccountOpen(false);
-    router.push("/sign-in?switch=1");
+  async function handleSwitchTo(sessionToken: string, userId: string) {
+    if (userId === user.id) {
+      setAccountOpen(false);
+      return;
+    }
+    setSwitchingToken(sessionToken);
+    try {
+      const ms = (
+        authClient as unknown as {
+          multiSession?: {
+            setActive?: (args: { sessionToken: string }) => Promise<unknown>;
+          };
+        }
+      ).multiSession;
+      await ms?.setActive?.({ sessionToken });
+      setAccountOpen(false);
+      router.refresh();
+    } catch {
+      setAccountOpen(false);
+      router.push("/sign-in?switch=1");
+    } finally {
+      setSwitchingToken(null);
+    }
   }
 
   return (
@@ -242,32 +361,63 @@ export function NoteSidebar({
         <div ref={accountRef} className="relative">
           {accountOpen && (
             <div className="absolute bottom-[calc(100%+8px)] left-0 right-0 z-20 overflow-hidden rounded-xl border border-line bg-surface shadow-[0_12px_32px_-12px_rgba(33,31,27,0.28)]">
-              <div className="border-b border-line/80 px-3 py-3">
+              <div className="border-b border-line/80 px-3 py-2.5">
                 <p className="text-[11px] font-medium uppercase tracking-[0.14em] text-muted">
-                  Signed in as
+                  Accounts
                 </p>
-                <div className="mt-2 flex items-center gap-2.5">
-                  {user.image ? (
-                    <img
-                      src={user.image}
-                      alt={user.name || "Profile"}
-                      className="size-9 shrink-0 rounded-full object-cover ring-1 ring-line"
-                      referrerPolicy="no-referrer"
-                    />
-                  ) : (
-                    <span className="grid size-9 shrink-0 place-items-center rounded-full bg-gradient-to-br from-accent to-[#8b7cf6] text-[11px] font-semibold text-white shadow-sm">
-                      {initials(user.name) || "U"}
-                    </span>
-                  )}
-                  <div className="min-w-0">
-                    <p className="truncate text-[13px] font-medium text-ink">
-                      {user.name || "Account"}
-                    </p>
-                    <p className="truncate text-[11px] text-muted">{user.email}</p>
-                  </div>
-                </div>
               </div>
-              <div className="p-1.5">
+              <div className="max-h-64 overflow-y-auto p-1.5">
+                {loadingAccounts && deviceSessions.length === 0 ? (
+                  <div className="flex items-center gap-2 px-2.5 py-2 text-[12px] text-muted">
+                    <Loader2 className="size-3.5 animate-spin" />
+                    Loading accounts…
+                  </div>
+                ) : (
+                  accountsToShow.map((account) => {
+                    const active = account.user.id === user.id;
+                    const switching = switchingToken === account.sessionToken;
+                    return (
+                      <button
+                        key={`${account.user.id}-${account.sessionToken}`}
+                        type="button"
+                        onClick={() => handleSwitchTo(account.sessionToken, account.user.id)}
+                        disabled={switching || signingOut}
+                        className={cn(
+                          "flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left transition hover:bg-[#f7f4ed] disabled:opacity-70",
+                          active && "bg-[#f7f4ed]/70",
+                        )}
+                      >
+                        {account.user.image ? (
+                          <img
+                            src={account.user.image}
+                            alt={account.user.name || "Profile"}
+                            className="size-8 shrink-0 rounded-full object-cover ring-1 ring-line"
+                            referrerPolicy="no-referrer"
+                          />
+                        ) : (
+                          <span className="grid size-8 shrink-0 place-items-center rounded-full bg-gradient-to-br from-accent to-[#8b7cf6] text-[10px] font-semibold text-white shadow-sm">
+                            {initials(account.user.name || "") || "U"}
+                          </span>
+                        )}
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate text-[12.5px] font-medium text-ink">
+                            {account.user.name || "Account"}
+                          </p>
+                          <p className="truncate text-[10.5px] text-muted">
+                            {account.user.email}
+                          </p>
+                        </div>
+                        {switching ? (
+                          <Loader2 className="size-4 shrink-0 animate-spin text-muted" />
+                        ) : active ? (
+                          <Check className="size-4 shrink-0 text-accent" />
+                        ) : null}
+                      </button>
+                    );
+                  })
+                )}
+              </div>
+              <div className="border-t border-line/80 p-1.5">
                 <button
                   type="button"
                   onClick={handleAddAccount}
@@ -275,14 +425,6 @@ export function NoteSidebar({
                 >
                   <UserPlus className="size-4 text-muted" />
                   Add account
-                </button>
-                <button
-                  type="button"
-                  onClick={handleSwitchAccount}
-                  className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-[12.5px] text-ink-soft transition hover:bg-[#f7f4ed] hover:text-ink"
-                >
-                  <UserPlus className="size-4 text-muted" />
-                  Switch account
                 </button>
                 <button
                   type="button"
