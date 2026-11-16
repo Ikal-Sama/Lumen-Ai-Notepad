@@ -11,6 +11,7 @@ import {
   Italic,
   List,
   ListChecks,
+  ListOrdered,
   Loader2,
   Lock,
   Pencil,
@@ -322,15 +323,42 @@ export function NoteEditor({
     const blockEnd = lineEndIndex === -1 ? content.length : lineEndIndex;
     const block = content.slice(lineStart, blockEnd);
     const lines = block.split("\n");
-    const shouldRemove =
-      lines.length > 0 &&
-      lines.every((line) => line.trim().length === 0 || line.startsWith(prefix));
 
+    const markerInfo = (line: string) => {
+      const m = line.match(/^(\s*)((?:- \[[ xX]\] )|(?:[-*+] )|(?:\d+\. )|(?:> )|(?:#{1,6} ))?(.*)$/);
+      return {
+        indent: m?.[1] ?? "",
+        marker: m?.[2] ?? "",
+        rest: m?.[3] ?? line,
+      };
+    };
+    const isSameMarkerType = (existing: string, target: string) => {
+      if (!existing) return false;
+      if (target === "- [ ] ") return /^- \[[ xX]\] $/.test(existing);
+      if (target === "- ") return /^[-*+] $/.test(existing) && !/^- \[[ xX]\] $/.test(existing);
+      if (target === "1. ") return /^\d+\. $/.test(existing);
+      if (target === "> ") return /^> $/.test(existing);
+      if (target === "## ") return /^#{1,6} $/.test(existing);
+      return existing === target;
+    };
+
+    const nonEmpty = lines.filter((line) => line.trim().length > 0);
+    const shouldRemove =
+      nonEmpty.length > 0 &&
+      nonEmpty.every((line) => isSameMarkerType(markerInfo(line).marker, prefix));
+
+    let orderedIndex = 1;
     const nextBlock = lines
       .map((line) => {
         if (line.trim().length === 0) return line;
-        if (shouldRemove) return line.startsWith(prefix) ? line.slice(prefix.length) : line;
-        return line.startsWith(prefix) ? line : `${prefix}${line}`;
+        const info = markerInfo(line);
+        if (shouldRemove) {
+          return isSameMarkerType(info.marker, prefix)
+            ? `${info.indent}${info.rest}`
+            : line;
+        }
+        const target = prefix === "1. " ? `${orderedIndex++}. ` : prefix;
+        return `${info.indent}${target}${info.rest}`;
       })
       .join("\n");
 
@@ -339,13 +367,118 @@ export function NoteEditor({
     requestAnimationFrame(() => {
       textarea.focus();
       if (selected.length === 0) {
-        const delta = shouldRemove ? -prefix.length : prefix.length;
-        const position = Math.max(lineStart, start + delta);
+        const beforeLine = content.slice(
+          lineStart,
+          content.indexOf("\n", lineStart) === -1 ? content.length : content.indexOf("\n", lineStart),
+        );
+        const afterLine = next.slice(
+          lineStart,
+          next.indexOf("\n", lineStart) === -1 ? next.length : next.indexOf("\n", lineStart),
+        );
+        const beforeInfo = markerInfo(beforeLine);
+        const afterInfo = markerInfo(afterLine);
+        const delta =
+          afterInfo.indent.length +
+          afterInfo.marker.length -
+          (beforeInfo.indent.length + beforeInfo.marker.length);
+        const position = Math.max(
+          lineStart,
+          Math.min(start + delta, lineStart + afterLine.length),
+        );
         textarea.setSelectionRange(position, position);
       } else {
         textarea.setSelectionRange(lineStart, lineStart + nextBlock.length);
       }
     });
+  }
+
+  function handleEditorKeyDown(event: React.KeyboardEvent<HTMLTextAreaElement>) {
+    const textarea = textareaRef.current;
+    if (!textarea) return;
+
+    // Bold / Italic shortcuts
+    if ((event.metaKey || event.ctrlKey) && !event.shiftKey) {
+      const key = event.key.toLowerCase();
+      if (key === "b") {
+        event.preventDefault();
+        applyWrap("**", "**", "bold text");
+        return;
+      }
+      if (key === "i") {
+        event.preventDefault();
+        applyWrap("_", "_", "italic text");
+        return;
+      }
+    }
+
+    // Indent / outdent selected lines
+    if (event.key === "Tab") {
+      event.preventDefault();
+      const start = textarea.selectionStart;
+      const end = textarea.selectionEnd;
+      const lineStart = content.lastIndexOf("\n", start - 1) + 1;
+      const lineEndIndex = content.indexOf("\n", end);
+      const blockEnd = lineEndIndex === -1 ? content.length : lineEndIndex;
+      const block = content.slice(lineStart, blockEnd);
+      const lines = block.split("\n");
+      const nextBlock = lines
+        .map((line) => {
+          if (event.shiftKey) {
+            return line.replace(/^( {1,2}|\t)/, "");
+          }
+          return line.length === 0 ? line : `  ${line}`;
+        })
+        .join("\n");
+      const next = content.slice(0, lineStart) + nextBlock + content.slice(blockEnd);
+      handleContentChange(next);
+      requestAnimationFrame(() => {
+        textarea.focus();
+        if (start === end) {
+          const delta = event.shiftKey ? -Math.min(2, (lines[0]?.match(/^( {1,2}|\t)/)?.[0].length ?? 0)) : 2;
+          const pos = Math.max(lineStart, start + delta);
+          textarea.setSelectionRange(pos, pos);
+        } else {
+          textarea.setSelectionRange(lineStart, lineStart + nextBlock.length);
+        }
+      });
+      return;
+    }
+
+    // Continue lists / blockquotes on Enter
+    if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
+      const start = textarea.selectionStart;
+      const end = textarea.selectionEnd;
+      if (start !== end) return; // let default behavior for replacements
+      const lineStart = content.lastIndexOf("\n", start - 1) + 1;
+      const line = content.slice(lineStart, start);
+      const m = line.match(/^(\s*)((?:- \[[ xX]\] )|(?:[-*+] )|(?:\d+\. )|(?:> ))(.*)$/);
+      if (!m) return;
+      const [, indent, marker, rest] = m;
+      if (rest.trim().length === 0) {
+        // Empty list/quote item: exit the block
+        event.preventDefault();
+        const next = content.slice(0, lineStart) + content.slice(start);
+        handleContentChange(next);
+        requestAnimationFrame(() => {
+          textarea.focus();
+          textarea.setSelectionRange(lineStart, lineStart);
+        });
+        return;
+      }
+      event.preventDefault();
+      let nextMarker = marker;
+      const numMatch = marker.match(/^(\d+)\. $/);
+      if (numMatch) nextMarker = `${Number(numMatch[1]) + 1}. `;
+      if (/^- \[[xX]\] $/.test(marker)) nextMarker = "- [ ] ";
+      const insert = `\n${indent}${nextMarker}`;
+      const next = content.slice(0, start) + insert + content.slice(end);
+      handleContentChange(next);
+      requestAnimationFrame(() => {
+        textarea.focus();
+        const pos = start + insert.length;
+        textarea.setSelectionRange(pos, pos);
+      });
+    }
   }
 
   const words = countWords(content);
@@ -554,6 +687,12 @@ export function NoteEditor({
                   <List className="size-3.5" />
                 </ToolbarButton>
                 <ToolbarButton
+                  label="Numbered list"
+                  onClick={() => applyLinePrefix("1. ")}
+                >
+                  <ListOrdered className="size-3.5" />
+                </ToolbarButton>
+                <ToolbarButton
                   label="Task list"
                   onClick={() => applyLinePrefix("- [ ] ")}
                 >
@@ -580,6 +719,7 @@ export function NoteEditor({
                 ref={textareaRef}
                 value={content}
                 onChange={(event) => handleContentChange(event.target.value)}
+                onKeyDown={handleEditorKeyDown}
                 onBlur={() => void persist()}
                 placeholder={`Start writing, or ask Lumen AI to draft something…
 
