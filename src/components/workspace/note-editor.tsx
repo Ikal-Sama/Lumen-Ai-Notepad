@@ -83,7 +83,7 @@ export function NoteEditor({
 }: NoteEditorProps) {
   const [title, setTitle] = useState(note.title);
   const [content, setContent] = useState(note.content);
-  const [mode, setMode] = useState<EditorMode>("edit");
+  const [mode, setMode] = useState<EditorMode>("preview");
   const [status, setStatus] = useState<SaveStatus>("saved");
   const [canUndo, setCanUndo] = useState(false);
 
@@ -315,14 +315,36 @@ export function NoteEditor({
     if (!textarea) return;
 
     const start = textarea.selectionStart;
+    const end = textarea.selectionEnd;
+    const selected = content.slice(start, end);
     const lineStart = content.lastIndexOf("\n", start - 1) + 1;
-    const next = content.slice(0, lineStart) + prefix + content.slice(lineStart);
+    const lineEndIndex = content.indexOf("\n", end);
+    const blockEnd = lineEndIndex === -1 ? content.length : lineEndIndex;
+    const block = content.slice(lineStart, blockEnd);
+    const lines = block.split("\n");
+    const shouldRemove =
+      lines.length > 0 &&
+      lines.every((line) => line.trim().length === 0 || line.startsWith(prefix));
 
+    const nextBlock = lines
+      .map((line) => {
+        if (line.trim().length === 0) return line;
+        if (shouldRemove) return line.startsWith(prefix) ? line.slice(prefix.length) : line;
+        return line.startsWith(prefix) ? line : `${prefix}${line}`;
+      })
+      .join("\n");
+
+    const next = content.slice(0, lineStart) + nextBlock + content.slice(blockEnd);
     handleContentChange(next);
     requestAnimationFrame(() => {
       textarea.focus();
-      const position = start + prefix.length;
-      textarea.setSelectionRange(position, position);
+      if (selected.length === 0) {
+        const delta = shouldRemove ? -prefix.length : prefix.length;
+        const position = Math.max(lineStart, start + delta);
+        textarea.setSelectionRange(position, position);
+      } else {
+        textarea.setSelectionRange(lineStart, lineStart + nextBlock.length);
+      }
     });
   }
 
@@ -572,7 +594,21 @@ export function NoteEditor({
           ) : (
             <div className="min-h-[42vh]">
               {content.trim() ? (
-                <Markdown className="prose-base text-[15px]">
+                <Markdown
+                  className="prose-base text-[15px]"
+                  onToggleTask={(taskIndex, checked) => {
+                    let i = -1;
+                    const next = content.replace(
+                      /^(\s*[-*+]\s+)\[( |x|X)\](?=\s|$)/gm,
+                      (match, lead) => {
+                        i += 1;
+                        if (i !== taskIndex) return match;
+                        return `${lead}[${checked ? "x" : " "}]`;
+                      },
+                    );
+                    if (next !== content) handleContentChange(next);
+                  }}
+                >
                   {content}
                 </Markdown>
               ) : (
