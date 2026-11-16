@@ -89,7 +89,13 @@ export function AiChatPanel({
       SpeechRecognition?: unknown;
       webkitSpeechRecognition?: unknown;
     };
-    return Boolean(w.SpeechRecognition || w.webkitSpeechRecognition);
+    if (w.SpeechRecognition || w.webkitSpeechRecognition) return true;
+    return Boolean(
+      typeof navigator !== "undefined" &&
+        navigator.mediaDevices &&
+        typeof navigator.mediaDevices.getUserMedia === "function" &&
+        typeof MediaRecorder !== "undefined",
+    );
   });
   const [sendError, setSendError] = useState<string | null>(null);
   const [preparing, setPreparing] = useState(false);
@@ -98,6 +104,10 @@ export function AiChatPanel({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const recognitionRef = useRef<{ stop?: () => void | Promise<void> } | null>(null);
   const nativeRecognitionActiveRef = useRef(false);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const mediaStreamRef = useRef<MediaStream | null>(null);
+  const mediaChunksRef = useRef<Blob[]>([]);
+  const webRecordingActiveRef = useRef(false);
   const dictationBaseRef = useRef("");
   const dictationFinalRef = useRef("");
   const createdRef = useRef(onNoteCreated);
@@ -178,6 +188,13 @@ export function AiChatPanel({
         if (nativeRecognitionActiveRef.current) {
           void SpeechRecognition.stop().catch(() => {});
           void SpeechRecognition.removeAllListeners().catch(() => {});
+        } else if (webRecordingActiveRef.current && mediaRecorderRef.current) {
+          try {
+            if (mediaRecorderRef.current.state !== "inactive") mediaRecorderRef.current.stop();
+          } catch {
+            // ignore
+          }
+          mediaStreamRef.current?.getTracks().forEach((t) => t.stop());
         } else {
           const rec = recognitionRef.current as { stop?: () => void } | null;
           rec?.stop?.();
@@ -187,6 +204,10 @@ export function AiChatPanel({
       }
       recognitionRef.current = null;
       nativeRecognitionActiveRef.current = false;
+      webRecordingActiveRef.current = false;
+      mediaRecorderRef.current = null;
+      mediaStreamRef.current = null;
+      mediaChunksRef.current = [];
     };
   }, []);
 
@@ -215,25 +236,30 @@ export function AiChatPanel({
       webkitSpeechRecognition?: new () => SpeechRecognitionLike;
     };
     const SpeechRecognitionCtor = w.SpeechRecognition || w.webkitSpeechRecognition;
-    if (!SpeechRecognitionCtor) {
-      setSendError("Voice dictation isn’t supported in this browser or WebView.");
-      return;
-    }
 
-    if (listening || nativeRecognitionActiveRef.current) {
+    if (listening || nativeRecognitionActiveRef.current || webRecordingActiveRef.current) {
       try {
         if (nativeRecognitionActiveRef.current) {
           nativeRecognitionActiveRef.current = false;
           await SpeechRecognition.stop().catch(() => {});
           await SpeechRecognition.removeAllListeners().catch(() => {});
+          setListening(false);
+        } else if (webRecordingActiveRef.current && mediaRecorderRef.current) {
+          const recorder = mediaRecorderRef.current;
+          if (recorder.state !== "inactive") recorder.stop();
+          // onstop handler will finalize, transcribe, and reset state
+          return;
         } else {
           await Promise.resolve(recognitionRef.current?.stop?.());
+          setListening(false);
         }
       } catch {
         // ignore
       } finally {
-        recognitionRef.current = null;
-        setListening(false);
+        if (!webRecordingActiveRef.current) {
+          recognitionRef.current = null;
+          setListening(false);
+        }
       }
       return;
     }
@@ -292,6 +318,117 @@ export function AiChatPanel({
         }
         return;
       }
+    }
+
+    // Web: prefer MediaRecorder + server transcription (reliable, works like ChatGPT/Gemini)
+    if (
+      typeof navigator !== "undefined" &&
+      navigator.mediaDevices?.getUserMedia &&
+      typeof MediaRecorder !== "undefined"
+    ) {
+      try {
+        setSendError(null);
+        dictationBaseRef.current = input;
+        mediaChunksRef.current = [];
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        mediaStreamRef.current = stream;
+        const mimeCandidates = [
+          "audio/webm;codecs=opus",
+          "audio/webm",
+          "audio/mp4",
+          "audio/ogg;codecs=opus",
+        ];
+        const mimeType = mimeCandidates.find((m) => MediaRecorder.isTypeSupported(m));
+        const recorder = mimeType
+          ? new MediaRecorder(stream, { mimeType })
+          : new MediaRecorder(stream);
+        mediaRecorderRef.current = recorder;
+        webRecordingActiveRef.current = true;
+
+        recorder.ondataavailable = (event) => {
+          if (event.data && event.data.size > 0) mediaChunksRef.current.push(event.data);
+        };
+        recorder.onerror = () => {
+          setSendError("Voice recording failed. Please try again.");
+        };
+        recorder.onstop = async () => {
+          const chunks = mediaChunksRef.current.slice();
+          mediaChunksRef.current = [];
+          webRecordingActiveRef.current = false;
+          setListening(false);
+          try {
+            stream.getTracks().forEach((t) => t.stop());
+          } catch {
+            // ignore
+          }
+          mediaStreamRef.current = null;
+          mediaRecorderRef.current = null;
+          if (chunks.length === 0) return;
+
+          const blob = new Blob(chunks, { type: recorder.mimeType || "audio/webm" });
+          if (blob.size === 0) return;
+
+          try {
+            const form = new FormData();
+            const ext = blob.type.includes("mp4")
+              ? "mp4"
+              : blob.type.includes("ogg")
+                ? "ogg"
+                : "webm";
+            form.append("audio", blob, `dictation.${ext}`);
+            const res = await fetch("/api/transcribe", { method: "POST", body: form });
+            const data = (await res.json().catch(() => ({}))) as {
+              text?: string;
+              error?: string;
+            };
+            if (!res.ok) {
+              setSendError(
+                data?.error ||
+                  "Voice dictation couldn’t be transcribed. Check transcription configuration and try again.",
+              );
+              return;
+            }
+            const transcript = String(data?.text ?? "").trim();
+            if (!transcript) {
+              setSendError("No speech detected. Try again and speak clearly.");
+              return;
+            }
+            const base = dictationBaseRef.current.replace(/\s+$/, "");
+            setInput(base ? `${base} ${transcript}` : transcript);
+          } catch {
+            setSendError("Voice dictation couldn’t be transcribed. Please try again.");
+          }
+        };
+
+        recorder.start();
+        setListening(true);
+        return;
+      } catch (err) {
+        webRecordingActiveRef.current = false;
+        setListening(false);
+        try {
+          mediaStreamRef.current?.getTracks().forEach((t) => t.stop());
+        } catch {
+          // ignore
+        }
+        mediaStreamRef.current = null;
+        mediaRecorderRef.current = null;
+        const name = err instanceof Error ? err.name : "";
+        if (name === "NotAllowedError" || name === "SecurityError") {
+          setSendError("Microphone access was blocked. Allow mic permission to use voice dictation.");
+          return;
+        }
+        if (name === "NotFoundError") {
+          setSendError("No microphone was found. Check your device mic and try again.");
+          return;
+        }
+        // Fall through to Web SpeechRecognition fallback below if available
+      }
+    }
+
+    if (!SpeechRecognitionCtor) {
+      setSendError("Voice dictation isn’t supported in this browser.");
+      return;
     }
 
     const recognition = new SpeechRecognitionCtor();
