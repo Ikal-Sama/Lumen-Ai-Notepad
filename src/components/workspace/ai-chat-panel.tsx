@@ -3,6 +3,8 @@
 import { useEffect, useRef, useState } from "react";
 import { useChat } from "@ai-sdk/react";
 import { DefaultChatTransport } from "ai";
+import { Capacitor } from "@capacitor/core";
+import { SpeechRecognition } from "@capacitor-community/speech-recognition";
 import {
   AlertCircle,
   ArrowUp,
@@ -80,23 +82,24 @@ export function AiChatPanel({
   const [input, setInput] = useState("");
   const [attachments, setAttachments] = useState<File[]>([]);
   const [listening, setListening] = useState(false);
-  const [speechSupported] = useState(
-    () =>
-      typeof window !== "undefined" &&
-      Boolean(
-        (window as unknown as { SpeechRecognition?: unknown; webkitSpeechRecognition?: unknown })
-          .SpeechRecognition ||
-          (window as unknown as { SpeechRecognition?: unknown; webkitSpeechRecognition?: unknown })
-            .webkitSpeechRecognition,
-      ),
-  );
+  const [speechSupported] = useState(() => {
+    if (typeof window === "undefined") return false;
+    if (Capacitor.isNativePlatform()) return true;
+    const w = window as unknown as {
+      SpeechRecognition?: unknown;
+      webkitSpeechRecognition?: unknown;
+    };
+    return Boolean(w.SpeechRecognition || w.webkitSpeechRecognition);
+  });
   const [sendError, setSendError] = useState<string | null>(null);
   const [preparing, setPreparing] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const recognitionRef = useRef<{ stop?: () => void } | null>(null);
+  const recognitionRef = useRef<{ stop?: () => void | Promise<void> } | null>(null);
+  const nativeRecognitionActiveRef = useRef(false);
   const dictationBaseRef = useRef("");
+  const dictationFinalRef = useRef("");
   const createdRef = useRef(onNoteCreated);
   const updatedRef = useRef(onNoteUpdated);
   const applyCreateRef = useRef(onApplyCreateNote);
@@ -172,16 +175,22 @@ export function AiChatPanel({
   useEffect(() => {
     return () => {
       try {
-        const rec = recognitionRef.current as { stop?: () => void } | null;
-        rec?.stop?.();
+        if (nativeRecognitionActiveRef.current) {
+          void SpeechRecognition.stop().catch(() => {});
+          void SpeechRecognition.removeAllListeners().catch(() => {});
+        } else {
+          const rec = recognitionRef.current as { stop?: () => void } | null;
+          rec?.stop?.();
+        }
       } catch {
         // ignore
       }
       recognitionRef.current = null;
+      nativeRecognitionActiveRef.current = false;
     };
   }, []);
 
-  function toggleVoiceDictation() {
+  async function toggleVoiceDictation() {
     if (typeof window === "undefined") return;
     if (working) return;
     type SpeechRecognitionEventLike = {
@@ -211,14 +220,78 @@ export function AiChatPanel({
       return;
     }
 
-    if (listening && recognitionRef.current) {
+    if (listening || nativeRecognitionActiveRef.current) {
       try {
-        recognitionRef.current.stop?.();
+        if (nativeRecognitionActiveRef.current) {
+          nativeRecognitionActiveRef.current = false;
+          await SpeechRecognition.stop().catch(() => {});
+          await SpeechRecognition.removeAllListeners().catch(() => {});
+        } else {
+          await Promise.resolve(recognitionRef.current?.stop?.());
+        }
       } catch {
         // ignore
+      } finally {
+        recognitionRef.current = null;
+        setListening(false);
       }
-      setListening(false);
       return;
+    }
+
+    if (Capacitor.isNativePlatform()) {
+      try {
+        setSendError(null);
+        dictationBaseRef.current = input;
+        dictationFinalRef.current = "";
+        const perm = await SpeechRecognition.requestPermissions();
+        const speechPerm = (perm as { speechRecognition?: string }).speechRecognition;
+        if (speechPerm && speechPerm !== "granted") {
+          setSendError("Microphone/speech permission is required for voice dictation.");
+          return;
+        }
+        const availability = await SpeechRecognition.available().catch(() => ({ available: false }));
+        if (!availability?.available) {
+          setSendError("Voice dictation isn’t available on this device.");
+          return;
+        }
+
+        await SpeechRecognition.removeAllListeners().catch(() => {});
+        await SpeechRecognition.addListener("partialResults", (data: { matches: string[] }) => {
+          const text = (data?.matches?.[0] ?? "").trim();
+          if (!text) return;
+          dictationFinalRef.current = text;
+          const base = dictationBaseRef.current.replace(/\s+$/, "");
+          setInput(base ? `${base} ${text}` : text);
+        });
+        await SpeechRecognition.addListener("listeningState", (data: { status: "started" | "stopped" }) => {
+          if (data?.status === "started") setListening(true);
+          if (data?.status === "stopped") {
+            setListening(false);
+            nativeRecognitionActiveRef.current = false;
+          }
+        });
+
+        nativeRecognitionActiveRef.current = true;
+        setListening(true);
+        await SpeechRecognition.start({
+          language: typeof navigator !== "undefined" ? navigator.language || "en-US" : "en-US",
+          maxResults: 3,
+          partialResults: true,
+          popup: false,
+        });
+        return;
+      } catch (err) {
+        nativeRecognitionActiveRef.current = false;
+        setListening(false);
+        await SpeechRecognition.removeAllListeners().catch(() => {});
+        const message = err instanceof Error ? err.message : String(err ?? "");
+        if (/permission/i.test(message)) {
+          setSendError("Microphone/speech permission is required for voice dictation.");
+        } else {
+          setSendError("Voice dictation couldn’t start on this device. Check microphone permission and try again.");
+        }
+        return;
+      }
     }
 
     const recognition = new SpeechRecognitionCtor();

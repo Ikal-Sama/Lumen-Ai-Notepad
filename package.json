@@ -18,6 +18,7 @@
     "@ai-sdk/openai": "4.0.118",
     "@ai-sdk/react": "4.0.177",
     "@better-auth/drizzle-adapter": "1.7.23",
+    "@capacitor-community/speech-recognition": "^7.0.1",
     "@capacitor/android": "^8.6.2",
     "@capacitor/cli": "^8.6.2",
     "@capacitor/core": "^8.6.2",
