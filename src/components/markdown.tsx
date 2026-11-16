@@ -1,6 +1,7 @@
 "use client";
 
 import ReactMarkdown from "react-markdown";
+import remarkBreaks from "remark-breaks";
 import remarkGfm from "remark-gfm";
 
 import { cn } from "@/lib/utils";
@@ -17,7 +18,7 @@ export function Markdown({ children, className, onToggleTask }: MarkdownProps) {
   return (
     <div className={cn("note-prose prose prose-stone max-w-none", className)}>
       <ReactMarkdown
-        remarkPlugins={[remarkGfm]}
+        remarkPlugins={[remarkGfm, remarkBreaks]}
         components={{
           a: ({ href, children: linkChildren, title }) => (
             <a
