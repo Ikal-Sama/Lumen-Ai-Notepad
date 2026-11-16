@@ -183,6 +183,7 @@ export function AiChatPanel({
 
   function toggleVoiceDictation() {
     if (typeof window === "undefined") return;
+    if (working) return;
     type SpeechRecognitionEventLike = {
       results: ArrayLike<
         ArrayLike<{ transcript: string }> & { isFinal: boolean; 0: { transcript: string } }
@@ -206,7 +207,7 @@ export function AiChatPanel({
     };
     const SpeechRecognitionCtor = w.SpeechRecognition || w.webkitSpeechRecognition;
     if (!SpeechRecognitionCtor) {
-      setSendError("Voice dictation isn’t supported in this browser.");
+      setSendError("Voice dictation isn’t supported in this browser or WebView.");
       return;
     }
 
@@ -763,12 +764,14 @@ export function AiChatPanel({
               <button
                 type="button"
                 onClick={toggleVoiceDictation}
-                disabled={working || !speechSupported}
+                disabled={working}
                 className={cn(
                   "relative grid size-7 place-items-center rounded-lg transition disabled:opacity-50",
                   listening
                     ? "bg-red-50 text-red-600 hover:bg-red-100"
-                    : "text-muted hover:bg-[#f7f4ed] hover:text-ink",
+                    : speechSupported
+                      ? "text-muted hover:bg-[#f7f4ed] hover:text-ink"
+                      : "text-muted/60 hover:bg-[#f7f4ed] hover:text-ink",
                 )}
                 aria-label={listening ? "Stop voice dictation" : "Start voice dictation"}
                 title={
