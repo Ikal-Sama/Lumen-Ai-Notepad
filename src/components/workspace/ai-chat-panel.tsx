@@ -193,6 +193,7 @@ export function AiChatPanel({
       continuous: boolean;
       interimResults: boolean;
       lang: string;
+      onstart: (() => void) | null;
       onresult: ((event: SpeechRecognitionEventLike) => void) | null;
       onerror: ((event: SpeechRecognitionErrorLike) => void) | null;
       onend: (() => void) | null;
@@ -221,7 +222,7 @@ export function AiChatPanel({
 
     const recognition = new SpeechRecognitionCtor();
     recognitionRef.current = recognition;
-    recognition.continuous = true;
+    recognition.continuous = false;
     recognition.interimResults = true;
     recognition.lang =
       typeof navigator !== "undefined" ? navigator.language || "en-US" : "en-US";
@@ -229,6 +230,9 @@ export function AiChatPanel({
     setSendError(null);
 
     let finalTranscript = "";
+    recognition.onstart = () => {
+      setListening(true);
+    };
     recognition.onresult = (event) => {
       let interim = "";
       for (let i = 0; i < event.results.length; i++) {
@@ -249,6 +253,10 @@ export function AiChatPanel({
         setSendError("Microphone access was blocked. Allow mic permission to use voice dictation.");
       } else if (code === "no-speech") {
         setSendError("No speech detected. Try again and speak clearly.");
+      } else if (code === "audio-capture") {
+        setSendError("No microphone was found. Check your device mic and try again.");
+      } else if (code === "network") {
+        setSendError("Voice dictation network error. Check your connection and try again.");
       } else if (code && code !== "aborted") {
         setSendError("Voice dictation couldn’t start. Please try again.");
       }
@@ -757,7 +765,7 @@ export function AiChatPanel({
                 onClick={toggleVoiceDictation}
                 disabled={working || !speechSupported}
                 className={cn(
-                  "grid size-7 place-items-center rounded-lg transition disabled:opacity-50",
+                  "relative grid size-7 place-items-center rounded-lg transition disabled:opacity-50",
                   listening
                     ? "bg-red-50 text-red-600 hover:bg-red-100"
                     : "text-muted hover:bg-[#f7f4ed] hover:text-ink",
@@ -766,13 +774,25 @@ export function AiChatPanel({
                 title={
                   speechSupported
                     ? listening
-                      ? "Stop dictation"
+                      ? "Listening… click to stop"
                       : "Dictate with voice"
                     : "Voice dictation not supported in this browser"
                 }
               >
-                {listening ? <MicOff className="size-4" /> : <Mic className="size-4" />}
+                {listening && (
+                  <>
+                    <span className="absolute inset-0 animate-ping rounded-lg bg-red-400/30" />
+                    <span className="absolute -right-0.5 -top-0.5 size-2 animate-pulse rounded-full bg-red-500 ring-2 ring-surface" />
+                  </>
+                )}
+                {listening ? <MicOff className="relative size-4" /> : <Mic className="size-4" />}
               </button>
+              {listening && (
+                <span className="ml-1 hidden items-center gap-1.5 text-[10px] font-medium text-red-600 sm:inline-flex">
+                  <span className="size-1.5 animate-pulse rounded-full bg-red-500" />
+                  Listening…
+                </span>
+              )}
               <p className="ml-1 hidden text-[9.5px] text-muted/90 sm:block">
                 Enter to send · Shift+Enter for a new line
               </p>
