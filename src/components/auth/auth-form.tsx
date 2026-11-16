@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useState } from "react";
 import { Capacitor } from "@capacitor/core";
 import { SocialLogin } from "@capgo/capacitor-social-login";
@@ -27,6 +27,9 @@ type AuthFormProps = {
 
 export function AuthForm({ mode }: AuthFormProps) {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const isAddAccountFlow =
+    searchParams.get("add") === "1" || searchParams.get("switch") === "1";
   const isSignUp = mode === "sign-up";
 
   const [name, setName] = useState("");
@@ -168,7 +171,8 @@ export function AuthForm({ mode }: AuthFormProps) {
       const result = await authClient.signIn.social({
         provider: "google",
         callbackURL: "/",
-      });
+        ...(isAddAccountFlow ? { prompt: "select_account" } : {}),
+      } as Parameters<typeof authClient.signIn.social>[0]);
 
       if (result.error) {
         setError(
