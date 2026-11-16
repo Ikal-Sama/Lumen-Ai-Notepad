@@ -1,5 +1,6 @@
 import { google } from "@ai-sdk/google";
 import { openai } from "@ai-sdk/openai";
+import { eq } from "drizzle-orm";
 import {
   convertToModelMessages,
   createUIMessageStreamResponse,
@@ -12,6 +13,9 @@ import {
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
+import { db } from "@/db";
+import { notes } from "@/db/schema";
+import { isUuid } from "@/lib/notes";
 import { getSession } from "@/lib/session";
 
 export const maxDuration = 60;
@@ -19,6 +23,9 @@ export const maxDuration = 60;
 const MAX_NOTE_CONTEXT_CHARS = 50_000;
 const MAX_SEARCH_RESULTS = 5;
 const MAX_SEARCH_CONTENT_CHARS = 2_000;
+const MAX_MESSAGES = 60;
+const MAX_SEARCHABLE_NOTES = 100;
+const MAX_CLIENT_NOTE_CHARS = 200_000;
 
 const SYSTEM_PROMPT = `You are a helpful AI assistant inside a note-taking app. Answer general questions normally. Whenever the user asks you to take a note, summarize something into a note, or create a study/action plan for them, generate well-structured Markdown content and invoke the createNote tool to save it under the user's account.
 
@@ -118,23 +125,43 @@ export async function POST(request: Request) {
   if (!Array.isArray(payload.messages) || payload.messages.length === 0) {
     return NextResponse.json({ error: "At least one message is required." }, { status: 400 });
   }
+  if (payload.messages.length > MAX_MESSAGES) {
+    return NextResponse.json(
+      { error: `Too many messages. Maximum is ${MAX_MESSAGES}.` },
+      { status: 400 },
+    );
+  }
+
+  // Authorize note IDs server-side to prevent spoofed/cross-user references.
+  const userNoteRows = await db
+    .select({ id: notes.id })
+    .from(notes)
+    .where(eq(notes.userId, session.user.id));
+  const allowedNoteIds = new Set(userNoteRows.map((n) => n.id));
 
   const openNote: OpenNote =
-    payload.openNote && typeof payload.openNote.id === "string"
+    payload.openNote &&
+    typeof payload.openNote.id === "string" &&
+    isUuid(payload.openNote.id) &&
+    allowedNoteIds.has(payload.openNote.id)
       ? {
           id: payload.openNote.id,
-          title: String(payload.openNote.title ?? "Untitled note"),
-          content: String(payload.openNote.content ?? ""),
+          title: String(payload.openNote.title ?? "Untitled note").slice(0, 200),
+          content: String(payload.openNote.content ?? "").slice(0, MAX_CLIENT_NOTE_CHARS),
         }
       : null;
 
   const searchableNotes: SearchableNote[] = Array.isArray(payload.searchableNotes)
     ? payload.searchableNotes
-        .filter((n): n is SearchableNote => Boolean(n && typeof n.id === "string"))
+        .filter(
+          (n): n is { id: string; title?: string; content?: string; updatedAt?: string } =>
+            Boolean(n && typeof n.id === "string" && isUuid(n.id) && allowedNoteIds.has(n.id)),
+        )
+        .slice(0, MAX_SEARCHABLE_NOTES)
         .map((n) => ({
           id: n.id,
-          title: String(n.title ?? "Untitled note"),
-          content: String(n.content ?? ""),
+          title: String(n.title ?? "Untitled note").slice(0, 200),
+          content: String(n.content ?? "").slice(0, MAX_CLIENT_NOTE_CHARS),
           updatedAt: String(n.updatedAt ?? new Date().toISOString()),
         }))
     : [];

@@ -56,8 +56,10 @@ export async function POST(request: Request) {
     const text = String(result.text ?? "").trim();
     return NextResponse.json({ text });
   } catch (error) {
-    const message =
-      error instanceof Error ? error.message : "Failed to transcribe audio.";
-    return NextResponse.json({ error: message }, { status: 500 });
+    console.error("Transcription failed", error);
+    return NextResponse.json(
+      { error: "Voice dictation couldn’t be transcribed. Please try again." },
+      { status: 500 },
+    );
   }
 }

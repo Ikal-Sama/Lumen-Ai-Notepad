@@ -6,14 +6,14 @@
 
 ## Summary
 
-| Severity | Finding |
-|---|---|
-| High | Encryption key bundle can be replaced by any authenticated session without verification (risk of permanent encrypted-note data loss/corruption) |
-| Medium | Chat API trusts client-supplied note content/IDs without server-side ownership verification |
-| Medium | Note PATCH accepts encrypted updates without requiring ciphertext/IV, allowing corrupted encrypted notes |
-| Medium | Internal/provider error messages are returned to clients in transcription (and potentially other paths) |
-| Low | Limited request-size/cost controls for chat payloads; client-supplied searchable context can be abused for cost/DoS |
-| Informational | Markdown rendering is reasonably hardened against raw-HTML XSS in current configuration |
+| Severity | Finding | Status |
+|---|---|---|
+| High | Encryption key bundle can be replaced by any authenticated session without verification (risk of permanent encrypted-note data loss/corruption) | **Mitigated** |
+| Medium | Chat API trusts client-supplied note content/IDs without server-side ownership verification | **Mitigated** |
+| Medium | Note PATCH accepts encrypted updates without requiring ciphertext/IV, allowing corrupted encrypted notes | **Fixed** |
+| Medium | Internal/provider error messages are returned to clients in transcription (and potentially other paths) | **Fixed** |
+| Low | Limited request-size/cost controls for chat payloads; client-supplied searchable context can be abused for cost/DoS | **Mitigated** |
+| Informational | Markdown rendering is reasonably hardened against raw-HTML XSS in current configuration | **Informational** |
 
 ---
 
@@ -40,6 +40,8 @@
 - Treat key-bundle replacement as a sensitive operation: require proof of current key ownership (e.g. client proves ability to unwrap/decrypt verifier with current credentials) or a dedicated, explicit key-rotation flow that re-wraps/re-encrypts as needed.
 - At minimum, reject `POST` when a bundle already exists unless an explicit, verified rotation flow is used; log/audit rotation attempts.
 - Consider rate limiting and additional CSRF/session-hardening for this endpoint.
+
+**Remediation status (2026-11-16):** `POST /api/encryption-key` now rejects replacement when a bundle already exists (`409`) to prevent destructive blind overwrites. A verified key-rotation/recovery flow is still recommended for legitimate rotation scenarios.
 
 ---
 
@@ -68,6 +70,8 @@
 - Treat client-provided note bodies as untrusted hints at most; never trust client-supplied IDs for mutation targets without authorization.
 - Validate and cap sizes/counts for `messages`, `openNote.content`, and `searchableNotes`.
 
+**Remediation status (2026-11-16):** `/api/chat` now authorizes `openNote`/`searchableNotes` IDs against the authenticated user’s notes server-side, ignores unauthorized IDs, and enforces stricter limits (`MAX_MESSAGES`, max searchable-note count, and max client note content length). Client-provided decrypted content is still accepted **only for authorized note IDs** to preserve the existing E2EE AI workflow; server-side decryption is not available in the current architecture.
+
 ---
 
 ### 3. [Medium] PATCH can store encrypted notes without ciphertext/IV (data corruption)
@@ -92,6 +96,8 @@
 - Mirror create-time invariants in PATCH: if `encryptionVersion > 0`, require non-empty `contentCiphertext` and `contentIv`; reject invalid combinations.
 - Consider rejecting transitions that would downgrade/alter encryption state unless explicitly intended and validated.
 
+**Remediation status (2026-11-16):** `PATCH /api/notes/[id]` now requires `contentCiphertext` and `contentIv` when `encryptionVersion > 0`.
+
 ---
 
 ### 4. [Medium] Internal/provider error details returned to clients
@@ -110,6 +116,8 @@
 **Recommendations**
 - Return a generic client-facing error message; log detailed errors server-side with request/session correlation (without logging sensitive audio/content).
 - Map known safe/provider-safe cases to user-friendly messages; avoid forwarding raw exception text by default.
+
+**Remediation status (2026-11-16):** `/api/transcribe` now logs detailed errors server-side (`console.error`) and returns a generic client-facing error message.
 
 ---
 
@@ -130,6 +138,8 @@
 **Recommendations**
 - Enforce strict limits: max request body size, max `messages` count, max total/individual note content lengths, max `searchableNotes` count.
 - Consider per-user rate limiting for chat/transcription endpoints.
+
+**Remediation status (2026-11-16):** `/api/chat` enforces message, searchable-note, and per-note content caps. Per-user rate limiting remains a recommended follow-up.
 
 ---
 
@@ -161,9 +171,9 @@
 
 ## Suggested Next Steps
 
-1. **Prioritize** fixing key-bundle replacement semantics and tightening PATCH invariants for encrypted notes.
-2. **Harden chat** by resolving/authorizing note context server-side and capping payload sizes.
-3. **Sanitize error responses** and add structured server-side logging/rate limiting.
+1. Implement a **verified key-rotation/recovery flow** for E2EE bundles (current mitigation blocks blind replacement but does not provide safe rotation).
+2. Add **per-user rate limiting** and structured server-side logging/monitoring for chat, transcription, and auth-sensitive endpoints.
+3. Continue hardening chat by moving more note-context resolution server-side where compatible with E2EE requirements.
 4. Perform a dependency vulnerability audit (`npm audit` / SCA) and add automated security checks in CI.
 
 ## Notes

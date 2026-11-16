@@ -27,7 +27,18 @@ const updateNoteSchema = z
       d.contentIv !== undefined ||
       d.encryptionVersion !== undefined,
     { message: "Provide a title or content to update." },
-  );
+  )
+  .superRefine((d, ctx) => {
+    if ((d.encryptionVersion ?? 0) > 0) {
+      if (!d.contentCiphertext || !d.contentIv) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message:
+            "Encrypted note updates must include both contentCiphertext and contentIv.",
+        });
+      }
+    }
+  });
 
 export async function GET(_request: Request, context: RouteContext) {
   const session = await getSession();

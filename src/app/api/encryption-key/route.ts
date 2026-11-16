@@ -72,13 +72,16 @@ export async function POST(request: Request) {
     .limit(1);
 
   if (existing) {
-    await db
-      .update(userEncryptionKeys)
-      .set(parsed.data)
-      .where(eq(userEncryptionKeys.userId, session.user.id));
-  } else {
-    await db.insert(userEncryptionKeys).values(values);
+    return NextResponse.json(
+      {
+        error:
+          "An encryption key is already set for this account. Replacing it is not allowed because it can make existing encrypted notes unrecoverable. Use account recovery flows instead.",
+      },
+      { status: 409 },
+    );
   }
+
+  await db.insert(userEncryptionKeys).values(values);
 
   return NextResponse.json({ ok: true });
 }
