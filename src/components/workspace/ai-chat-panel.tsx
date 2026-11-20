@@ -7,6 +7,7 @@ import { Capacitor } from "@capacitor/core";
 import { SpeechRecognition } from "@capacitor-community/speech-recognition";
 import {
   AlertCircle,
+  ArrowDown,
   ArrowUp,
   ArrowUpRight,
   Check,
@@ -168,12 +169,25 @@ export function AiChatPanel({
 
   const busy = status === "submitted" || status === "streaming";
   const working = busy || preparing;
+  const [pinned, setPinned] = useState(true);
 
   useEffect(() => {
     const element = scrollRef.current;
     if (!element) return;
+    const onScroll = () => {
+      const distance =
+        element.scrollHeight - element.scrollTop - element.clientHeight;
+      setPinned(distance < 80);
+    };
+    element.addEventListener("scroll", onScroll, { passive: true });
+    return () => element.removeEventListener("scroll", onScroll);
+  }, []);
+
+  useEffect(() => {
+    const element = scrollRef.current;
+    if (!element || !pinned) return;
     element.scrollTop = element.scrollHeight;
-  }, [messages, status]);
+  }, [messages, status, pinned]);
 
   useEffect(() => {
     const element = inputRef.current;
@@ -670,8 +684,9 @@ export function AiChatPanel({
       </div>
 
       {/* Messages */}
-      <div ref={scrollRef} className="flex-1 overflow-y-auto">
-        <div className="space-y-5 px-4 py-5">
+      <div className="relative flex-1 overflow-hidden">
+        <div ref={scrollRef} className="h-full overflow-y-auto">
+          <div className="space-y-5 px-4 py-5">
           {messages.length === 0 && (
             <div className="animate-rise">
               <div className="mt-2 text-center">
@@ -827,6 +842,7 @@ export function AiChatPanel({
                               isUser ? "max-w-[240px]" : "max-w-[280px]",
                             )}
                           >
+                            {/* eslint-disable-next-line @next/next/no-img-element -- runtime attachment URL (blob/data) */}
                             <img
                               src={url}
                               alt={name}
@@ -877,6 +893,22 @@ export function AiChatPanel({
             </div>
           )}
         </div>
+        </div>
+        {!pinned && (
+          <button
+            type="button"
+            onClick={() => {
+              const element = scrollRef.current;
+              if (element) element.scrollTop = element.scrollHeight;
+              setPinned(true);
+            }}
+            className="absolute bottom-3 left-1/2 z-10 flex -translate-x-1/2 items-center gap-1.5 rounded-full border border-line bg-surface/95 px-3 py-1.5 text-[11.5px] font-medium text-ink-soft shadow-sm backdrop-blur transition hover:text-ink"
+            aria-label="Scroll to latest message"
+          >
+            <ArrowDown className="size-3.5" />
+            Latest
+          </button>
+        )}
       </div>
 
       {/* Composer */}

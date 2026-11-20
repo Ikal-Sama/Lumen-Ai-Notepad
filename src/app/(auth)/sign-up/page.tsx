@@ -8,6 +8,10 @@ export const metadata: Metadata = {
   title: "Create an account",
 };
 
+// Auth pages read cookies + searchParams before rendering; let them block
+// instead of prerendering an instant shell with a streamed redirect.
+export const instant = false;
+
 export default async function SignUpPage({
   searchParams,
 }: {

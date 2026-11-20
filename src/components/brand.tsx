@@ -1,3 +1,4 @@
+import Image from "next/image";
 import Link from "next/link";
 
 import { cn } from "@/lib/utils";
@@ -15,9 +16,11 @@ export function Brand({ tone = "dark", className }: BrandProps) {
       aria-label="Lumen home"
     >
       <span className="relative inline-flex shrink-0 transition-transform duration-300 group-hover:-rotate-3">
-        <img
+        <Image
           src="/logo.png"
           alt="Lumen logo"
+          width={32}
+          height={32}
           className={cn(
             "size-8 rounded-lg object-contain",
             tone === "light" && "drop-shadow-sm",

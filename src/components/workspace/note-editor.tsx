@@ -533,6 +533,7 @@ export function NoteEditor({
               onClick={onEncryptNote}
               className="mr-1 flex h-8 items-center gap-1.5 rounded-lg px-2.5 text-[12px] font-medium text-ink-soft transition hover:bg-paper hover:text-ink"
               title="Encrypt this note (one-way)"
+              aria-label="Encrypt note"
             >
               <Shield className="size-3.5" />
               <span className="hidden sm:inline">Encrypt</span>
@@ -546,6 +547,7 @@ export function NoteEditor({
             }
             className="flex h-8 items-center gap-1.5 rounded-lg px-2.5 text-[12px] font-medium text-ink-soft transition hover:bg-paper hover:text-ink"
             title={mode === "edit" ? "Preview Markdown" : "Edit Markdown"}
+            aria-label={mode === "edit" ? "Preview Markdown" : "Edit Markdown"}
           >
             {mode === "edit" ? (
               <>
@@ -566,6 +568,7 @@ export function NoteEditor({
             disabled={status === "saving"}
             className="flex h-8 items-center gap-1.5 rounded-lg px-2.5 text-[12px] font-medium text-ink-soft transition hover:bg-paper hover:text-ink disabled:cursor-default disabled:opacity-45"
             title="Save note (Ctrl/Cmd + S)"
+            aria-label="Save note"
           >
             {status === "saving" ? (
               <Loader2 className="size-3.5 animate-spin" />

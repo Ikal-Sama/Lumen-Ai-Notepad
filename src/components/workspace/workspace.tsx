@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import Image from "next/image";
 import {
   AlertCircle,
   CheckCircle2,
@@ -454,7 +455,13 @@ export function Workspace({ user, initialNotes }: WorkspaceProps) {
               <Menu className="size-[18px]" />
             </button>
             <span className="flex items-center gap-1.5 md:hidden">
-              <img src="/logo.png" alt="Lumen logo" className="size-5 rounded-md object-contain" />
+              <Image
+                src="/logo.png"
+                alt="Lumen logo"
+                width={20}
+                height={20}
+                className="size-5 rounded-md object-contain"
+              />
               <span className="font-serif text-[19px] leading-none">Lumen</span>
             </span>
             <div className="hidden min-w-0 items-center gap-1.5 text-[12px] md:flex">
@@ -547,7 +554,8 @@ export function Workspace({ user, initialNotes }: WorkspaceProps) {
           .map((n) => ({
             id: n.id,
             title: n.title,
-            content: n.content,
+            // Cap what each chat turn carries; long notes stay openable via openNote.
+            content: n.content.slice(0, 20_000),
             updatedAt: n.updatedAt,
           }))}
         onBeforeSend={flushActiveNote}
@@ -821,7 +829,13 @@ function EmptyState({
         <div className="relative mx-auto w-fit">
           <span className="absolute inset-0 -z-10 scale-150 rounded-full bg-accent/10 blur-2xl" />
           <span className="grid size-14 place-items-center text-accent">
-            <img src="/logo.png" alt="Lumen logo" className="size-12 rounded-xl object-contain" />
+            <Image
+              src="/logo.png"
+              alt="Lumen logo"
+              width={48}
+              height={48}
+              className="size-12 rounded-xl object-contain"
+            />
           </span>
         </div>
         <h1 className="mt-6 font-serif text-[40px] leading-[1.05] tracking-tight text-ink">

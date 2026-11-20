@@ -8,6 +8,10 @@ export const metadata: Metadata = {
   title: "Sign in",
 };
 
+// Auth pages read cookies + searchParams before rendering; let them block
+// instead of prerendering an instant shell with a streamed redirect.
+export const instant = false;
+
 export default async function SignInPage({
   searchParams,
 }: {

@@ -1,3 +1,4 @@
+import Image from "next/image";
 import {
   ArrowUpRight,
   ListChecks,
@@ -9,7 +10,15 @@ import {
 import { Brand } from "@/components/brand";
 
 function LogoIcon({ className }: { className?: string }) {
-  return <img src="/logo.png" alt="Lumen logo" className={className} />;
+  return (
+    <Image
+      src="/logo.png"
+      alt="Lumen logo"
+      width={16}
+      height={16}
+      className={className}
+    />
+  );
 }
 
 const features = [

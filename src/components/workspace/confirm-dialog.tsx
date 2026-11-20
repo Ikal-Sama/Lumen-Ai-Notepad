@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { AlertTriangle, Loader2, ShieldAlert } from "lucide-react";
 
 type ConfirmDialogProps = {
@@ -26,10 +26,34 @@ export function ConfirmDialog({
   onConfirm,
   onCancel,
 }: ConfirmDialogProps) {
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const cancelRef = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const previous = document.activeElement as HTMLElement | null;
+    cancelRef.current?.focus();
+    return () => previous?.focus();
+  }, [open]);
+
   useEffect(() => {
     if (!open) return;
     const handleKey = (event: KeyboardEvent) => {
       if (event.key === "Escape" && !loading) onCancel();
+      if (event.key !== "Tab") return;
+      const focusable = dialogRef.current?.querySelectorAll<HTMLElement>(
+        'button:not([disabled]), [href], input, textarea, select, [tabindex]:not([tabindex="-1"])',
+      );
+      if (!focusable || focusable.length === 0) return;
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
     };
     window.addEventListener("keydown", handleKey);
     return () => window.removeEventListener("keydown", handleKey);
@@ -46,6 +70,7 @@ export function ConfirmDialog({
       role="dialog"
       aria-modal="true"
       aria-labelledby="confirm-title"
+      aria-describedby="confirm-description"
     >
       <button
         type="button"
@@ -53,7 +78,10 @@ export function ConfirmDialog({
         onClick={() => !loading && onCancel()}
         aria-label="Close dialog"
       />
-      <div className="animate-rise relative w-full max-w-sm rounded-2xl border border-line bg-surface p-5 shadow-[0_30px_80px_-30px_rgba(33,31,27,0.45)]">
+      <div
+        ref={dialogRef}
+        className="animate-rise relative w-full max-w-sm rounded-2xl border border-line bg-surface p-5 shadow-[0_30px_80px_-30px_rgba(33,31,27,0.45)]"
+      >
         <div
           className={
             warning
@@ -69,9 +97,12 @@ export function ConfirmDialog({
         >
           {title}
         </h2>
-        <p className="mt-2 text-[13px] leading-6 text-ink-soft">{description}</p>
+        <p id="confirm-description" className="mt-2 text-[13px] leading-6 text-ink-soft">
+          {description}
+        </p>
         <div className="mt-6 flex justify-end gap-2">
           <button
+            ref={cancelRef}
             type="button"
             onClick={onCancel}
             disabled={loading}

@@ -1,44 +1,15 @@
 import { and, eq } from "drizzle-orm";
 import { NextResponse } from "next/server";
-import { z } from "zod";
 
 import { db } from "@/db";
 import { notes } from "@/db/schema";
+import { updateNoteSchema } from "@/lib/note-schemas";
 import { isUuid, serializeNote } from "@/lib/notes";
 import { getSession } from "@/lib/session";
 
 type RouteContext = {
   params: Promise<{ id: string }>;
 };
-
-const updateNoteSchema = z
-  .object({
-    title: z.string().max(200).optional(),
-    content: z.string().max(500_000).optional(),
-    contentCiphertext: z.string().max(2_000_000).optional().nullable(),
-    contentIv: z.string().max(200).optional().nullable(),
-    encryptionVersion: z.number().int().min(0).max(10).optional(),
-  })
-  .refine(
-    (d) =>
-      d.title !== undefined ||
-      d.content !== undefined ||
-      d.contentCiphertext !== undefined ||
-      d.contentIv !== undefined ||
-      d.encryptionVersion !== undefined,
-    { message: "Provide a title or content to update." },
-  )
-  .superRefine((d, ctx) => {
-    if ((d.encryptionVersion ?? 0) > 0) {
-      if (!d.contentCiphertext || !d.contentIv) {
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          message:
-            "Encrypted note updates must include both contentCiphertext and contentIv.",
-        });
-      }
-    }
-  });
 
 export async function GET(_request: Request, context: RouteContext) {
   const session = await getSession();

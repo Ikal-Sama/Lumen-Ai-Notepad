@@ -388,6 +388,7 @@ export function NoteSidebar({
                         )}
                       >
                         {account.user.image ? (
+                          // eslint-disable-next-line @next/next/no-img-element -- avatar host depends on the OAuth provider
                           <img
                             src={account.user.image}
                             alt={account.user.name || "Profile"}
@@ -455,6 +456,7 @@ export function NoteSidebar({
             aria-label="Account menu"
           >
             {user.image ? (
+              // eslint-disable-next-line @next/next/no-img-element -- avatar host depends on the OAuth provider
               <img
                 src={user.image}
                 alt={user.name || "Profile"}
