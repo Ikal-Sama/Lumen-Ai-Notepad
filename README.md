@@ -275,3 +275,5 @@ To run the app on Android via Capacitor:
 - The chat route is authenticated before the model is called.
 - Note content is rendered with `react-markdown` (no `dangerouslySetInnerHTML`).
 - **Database migration:** apply the included Drizzle migration (`drizzle/0001_e2ee_notes.sql`) before using encrypted notes in an existing database. Notes encrypted by earlier app versions remain encrypted.
+- **Security assessments:** see [`docs/security-and-bug-review.md`](docs/security-and-bug-review.md) (source review) and [`docs/security-assessment-2026-11-18.md`](docs/security-assessment-2026-11-18.md) (penetration-style assessment with prioritized fixes).
+- **UX & maintainability:** see [`docs/ux-maintainability-pass.md`](docs/ux-maintainability-pass.md) for the latest resilience, accessibility, and code-health changes.

@@ -176,6 +176,8 @@
 3. Continue hardening chat by moving more note-context resolution server-side where compatible with E2EE requirements.
 4. Perform a dependency vulnerability audit (`npm audit` / SCA) and add automated security checks in CI.
 
+> **Follow-up (2026-11-18):** a second assessment covering runtime exploitation, the live deployment, and the shipped Android APK is documented in [`security-assessment-2026-11-18.md`](./security-assessment-2026-11-18.md). It adds high-severity findings for account-linking takeover, debug-signed/`debuggable` APKs, and AI endpoint cost abuse.
+
 ## Notes
 
 - This document records issues identified from source review; exploitability in production also depends on deployment configuration, Better Auth settings, rate limiting/WAF controls, and client behavior.
